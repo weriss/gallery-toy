@@ -71,13 +71,14 @@ const initScene = () => {
 // --- 加载图层 ---
 const loadLayers = () => {
   const loader = new THREE.TextureLoader();
-  
+  const baseUrl = import.meta.env.BASE_URL;
+
   // 图片定义
   const assets = [
-    { url: '/sky.png', depth: -2, scale: 6, name: 'sky' },      // 背景
-    { url: '/boy.png', depth: -0.5, scale: 4.5, name: 'boy' },   // 中景
-    { url: '/lady-removebg-preview.png', depth: 1, scale: 3.8, name: 'woman' },  // 主体
-    { url: '/grass-removebg-preview.png', depth: 2.5, scale: 5, name: 'grass' } // 前景
+    { url: `${baseUrl}sky.png`, depth: -2, scale: 6, name: 'sky' },      // 背景
+    { url: `${baseUrl}boy.png`, depth: -0.5, scale: 4.5, name: 'boy' },   // 中景
+    { url: `${baseUrl}lady-removebg-preview.png`, depth: 1, scale: 3.8, name: 'woman' },  // 主体
+    { url: `${baseUrl}grass-removebg-preview.png`, depth: 2.5, scale: 5, name: 'grass' } // 前景
   ];
 
   assets.forEach((item, index) => {
