@@ -6,6 +6,7 @@
   >
     <!-- 泡泡导航 -->
     <BubbleNav 
+      v-show="!navHidden"
       :pages="pages" 
       :currentPage="currentPage" 
       @page-change="handlePageChange"
@@ -15,12 +16,13 @@
     <MonetView v-show="currentPage === 'monet'" />
 
     <!-- 科技页面 -->
-    <TechView v-show="currentPage === 'tech'" />
+    <TechView v-show="currentPage === 'tech'" @explore-mode="handleExploreMode" />
   </div>
 </template>
 
 <script setup>
 import { ref, onMounted } from 'vue';
+import gsap from 'gsap';
 import BubbleNav from '@/components/BubbleNav.vue';
 import MonetView from '@/views/MonetView.vue';
 import TechView from '@/views/TechView.vue';
@@ -29,11 +31,26 @@ import { usePageTransition } from '@/composables/usePageTransition';
 import { useAnimations } from '@/composables/useAnimations';
 
 const container = ref(null);
-const currentPage = ref('monet');
+const currentPage = ref('tech');
 const pages = ref(pageConfig);
+const navHidden = ref(false);
 
 const { switchToTech, switchToMonet, animateBubbles } = usePageTransition();
 const { initHeaderAnimation, initBubbleAnimation } = useAnimations();
+
+const handleExploreMode = (active) => {
+  if (active) {
+    gsap.to('.bubble-nav', { x: -120, opacity: 0, duration: 0.7, ease: 'power2.in',
+      onComplete: () => { navHidden.value = true; }
+    });
+  } else {
+    navHidden.value = false;
+    gsap.fromTo('.bubble-nav',
+      { x: -120, opacity: 0 },
+      { x: 0, opacity: 1, duration: 0.7, ease: 'power2.out' }
+    );
+  }
+};
 
 const handlePageChange = (pageId) => {
   if (currentPage.value === pageId) return;
