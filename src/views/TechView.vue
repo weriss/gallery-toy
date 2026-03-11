@@ -1,13 +1,44 @@
 <template>
-  <div class="page-tech">
+  <div class="page-tech" :class="pageStateClass">
     <!-- Three.js 3D 场景 -->
     <canvas ref="canvasEl" class="scene-canvas"></canvas>
+    <div
+      v-if="showCornerMatte"
+      class="corner-matte"
+      :class="{ 'corner-matte-intro': introShroudVisible }"
+    ></div>
+    <div
+      v-if="introShroudVisible"
+      class="intro-shroud"
+      :style="introShroudStyle"
+    ></div>
+    <div
+      v-if="introTransitionActive"
+      class="intro-transition"
+    ></div>
 
     <!-- 扫描线效果 -->
     <div class="scanline-overlay"></div>
     
     <!-- 色差边缘 -->
     <div class="chromatic-edge"></div>
+    <div class="weather-overlay" :class="pageStateClass"></div>
+    <div class="noise-overlay"></div>
+
+    <Transition name="cue">
+      <div
+        v-if="sceneCue && !activeTransmission && !introBriefing && !endingPanel"
+        class="scene-cue"
+        :class="`cue-${sceneCue.mode}`"
+      >
+        <div class="cue-weather"></div>
+        <div class="cue-frame">
+          <div class="cue-kicker">FIELD SHIFT</div>
+          <h2 class="cue-title">{{ sceneCue.title }}</h2>
+          <p class="cue-body">{{ sceneCue.body }}</p>
+        </div>
+      </div>
+    </Transition>
 
     <!-- HUD 角框 -->
     <div class="hud-corner tl"></div>
@@ -17,10 +48,11 @@
 
     <!-- HUD 状态 -->
     <div class="hud-status">
-      <div><span class="status-dot"></span>ANOMALY DETECTED</div>
+      <div><span class="status-dot"></span>{{ linkStatus }}</div>
       <div>{{ currentDate }}</div>
-      <div>DEPTH: ████ m</div>
-      <div>ENTITY: UNKNOWN</div>
+      <div>FIELD UNIT: NIA-7</div>
+      <div>PENDING WINDOWS: {{ pendingSignals }}</div>
+      <div>VECTOR: {{ vectorLabel }}</div>
     </div>
 
     <!-- 左下角数据流 -->
@@ -32,27 +64,34 @@
 
     <!-- 主内容 -->
     <div class="tech-content" ref="contentEl">
-      <div class="tech-label">// SECTOR_NULL · WASTELAND PROTOCOL</div>
+      <div class="tech-label">// ECHO DESK · REMOTE ADVISORY LINK</div>
       <h1 class="tech-title" data-text="WERISS">WERISS</h1>
       <div class="tech-tagline">
         <span class="tag-line"></span>
-        THE ABYSS GAZES BACK
+        YOU CANNOT ENTER, BUT YOUR WORDS ARRIVE FIRST
       </div>
       
       <div class="tech-description">
-        在荒原的尽头<br/>
-        <span class="red-text">某物</span>正在苏醒
+        回响链路已重连。<br/>
+        一名进入山脉的实地人员正在向你发送失真信号。<br/>
+        <span class="red-text">你只有几秒</span>决定她下一步该怎么走。
       </div>
 
       <button class="tech-btn" @click="handleExplore">
         <span class="btn-bracket">[</span>
-        INITIALIZE
+        LINK IN
         <span class="btn-bracket">]</span>
       </button>
     </div>
 
     <!-- 探索模式：退出按钮 + 速度控制 -->
     <div class="explore-hud" ref="exploreHudEl">
+      <div class="link-metrics">
+        <div v-for="metric in statDisplay" :key="metric.label" class="metric-chip">
+          <span class="metric-label">{{ metric.label }}</span>
+          <span class="metric-value">{{ metric.value }}</span>
+        </div>
+      </div>
       <div class="tour-speed">
         <span class="speed-label">CRUISE SPEED</span>
         <input type="range" min="0.2" max="3" step="0.1" v-model.number="tourSpeed" class="speed-slider" />
@@ -63,20 +102,195 @@
       </button>
     </div>
 
+    <Transition name="briefing">
+      <div v-if="introBriefing" class="briefing-panel">
+        <div class="briefing-kicker">ROLE BRIEF / {{ introBriefing.label }}</div>
+        <h2 class="briefing-title">{{ introBriefing.title }}</h2>
+        <p class="briefing-copy">{{ introBriefing.body }}</p>
+        <div class="briefing-progress">
+          <span
+            v-for="step in introStepsCount"
+            :key="step"
+            class="progress-dot"
+            :class="{ active: step - 1 === introBriefingIndex }"
+          ></span>
+        </div>
+        <button class="choice-btn briefing-action" @click="handleAcknowledgeIntro">
+          <span class="choice-id">GO</span>
+          <span class="choice-copy">{{ introBriefing.action }}</span>
+        </button>
+      </div>
+    </Transition>
+
+    <Transition name="prep">
+      <div v-if="pendingTransmission && !activeTransmission" class="prep-panel">
+        <div class="prep-header">
+          <span class="prep-kicker">LINK PREP / {{ pendingTransmission.id }}</span>
+          <span class="prep-dist">DIST {{ pendingTransmission.dist }}m</span>
+        </div>
+        <h2 class="prep-title">{{ pendingTransmission.title }}</h2>
+        <p class="prep-body">{{ pendingTransmission.prompt }}</p>
+        <div class="prep-progress">
+          <span
+            v-for="step in 3"
+            :key="step"
+            class="prep-dot"
+            :class="{ active: step <= pendingTransmission.progress }"
+          ></span>
+        </div>
+        <div class="prep-instruction">
+          <span class="prep-instruction-label">WINDOW STATUS</span>
+          <span>
+            {{
+              pendingTransmission.windowReady
+                ? '正式窗口已稳定，完成至少 1 次预热后即可接入。'
+                : '正式窗口还在生成，先做一次链路预热。'
+            }}
+          </span>
+        </div>
+        <div class="prep-actions">
+          <button
+            v-for="action in pendingTransmission.actions"
+            :key="action.id"
+            class="prep-action"
+            :class="{ used: pendingTransmission.usedActions.includes(action.id) }"
+            :disabled="pendingTransmission.usedActions.includes(action.id)"
+            @click="handlePrepAction(action.id)"
+          >
+            {{ action.label }}
+          </button>
+        </div>
+        <div class="prep-result">{{ pendingTransmission.lastResult }}</div>
+        <button
+          class="prep-confirm"
+          :class="{ ready: canOpenPendingWindow }"
+          :disabled="!canOpenPendingWindow"
+          @click="handleOpenPendingWindow"
+        >
+          {{ canOpenPendingWindow ? '接入正式建议窗口' : '等待链路稳定' }}
+        </button>
+      </div>
+    </Transition>
+
+    <Transition name="buffer">
+      <div
+        v-if="bufferingTransmission && !activeTransmission"
+        class="buffer-panel"
+        :class="`buffer-${bufferingTransmission.mode}`"
+      >
+        <div class="buffer-grid"></div>
+        <div class="buffer-header">
+          <span class="buffer-kicker">WINDOW SYNC / {{ bufferingTransmission.id }}</span>
+          <span class="buffer-dist">DIST {{ bufferingTransmission.dist }}m</span>
+        </div>
+        <h2 class="buffer-title">{{ bufferingTransmission.title }}</h2>
+        <p class="buffer-lead">{{ bufferingTransmission.lead }}</p>
+        <div class="buffer-progress">
+          <div
+            class="buffer-progress-fill"
+            :style="{ transform: `scaleX(${bufferingTransmission.progress})` }"
+          ></div>
+        </div>
+        <div class="buffer-steps">
+          <div
+            v-for="(step, index) in bufferingTransmission.steps"
+            :key="step"
+            class="buffer-step"
+            :class="{
+              active: index === bufferingTransmission.stepIndex,
+              done: index < bufferingTransmission.stepIndex,
+            }"
+          >
+            <span class="buffer-step-index">0{{ index + 1 }}</span>
+            <span>{{ step }}</span>
+          </div>
+        </div>
+      </div>
+    </Transition>
+
     <!-- 信号弹窗 -->
     <Transition name="signal">
-      <div v-if="signalPopup" class="signal-popup">
+      <div v-if="activeTransmission" class="comms-popup">
         <div class="signal-header">
-          <span class="signal-tag">// SIGNAL_{{ signalPopup.id }}</span>
-          <span class="signal-dist">DIST: {{ signalPopup.dist }}m</span>
+          <span class="signal-tag">// WINDOW_{{ activeTransmission.id }}</span>
+          <span class="signal-dist">DIST: {{ activeTransmission.dist }}m</span>
         </div>
-        <div class="signal-body" v-html="signalPopup.text"></div>
+        <div class="signal-meta">
+          <div>{{ activeTransmission.title }}</div>
+          <div>{{ activeTransmission.subtitle }}</div>
+        </div>
+        <div class="signal-body" v-html="activeTransmission.message"></div>
+
+        <div v-if="activeTransmission.stage === 'choice'" class="choice-panel">
+          <div class="panel-label">TRANSMIT ADVICE</div>
+          <button
+            v-for="choice in activeTransmission.choices"
+            :key="choice.id"
+            class="choice-btn"
+            :class="{ obscured: choice.obscured }"
+            @click="handleSendAdvice(choice)"
+          >
+            <span class="choice-id">{{ choice.id }}</span>
+            <span class="choice-copy">{{ choice.label }}</span>
+          </button>
+        </div>
+
+        <div v-else class="reply-panel">
+          <div class="panel-label">ADVICE SENT</div>
+          <div class="outgoing-copy">{{ activeTransmission.selectedChoice?.advisory }}</div>
+          <div class="panel-label panel-label-reply">FIELD REPLY</div>
+          <div class="incoming-copy" :class="{ pending: !activeTransmission.reply }">
+            {{ activeTransmission.reply || 'NIA-7 is reading your signal...' }}
+          </div>
+        </div>
+
         <div class="signal-bar"></div>
       </div>
     </Transition>
 
+    <Transition name="ending">
+      <div v-if="endingPanel" class="ending-panel">
+        <div class="ending-header">
+          <div class="ending-kicker">ENDING / {{ endingPanel.code }}</div>
+          <div class="ending-vector">{{ endingPanel.vector }}</div>
+        </div>
+        <h2 class="ending-title">{{ endingPanel.title }}</h2>
+        <p class="ending-summary">{{ endingPanel.summary }}</p>
+        <div class="ending-body">{{ endingPanel.body }}</div>
+        <div class="ending-stats">
+          <div class="ending-stat">
+            <span>TRUST</span>
+            <strong>{{ stats.trust }}</strong>
+          </div>
+          <div class="ending-stat">
+            <span>RISK</span>
+            <strong>{{ stats.risk }}</strong>
+          </div>
+          <div class="ending-stat">
+            <span>TRUTH</span>
+            <strong>{{ stats.truth }}</strong>
+          </div>
+        </div>
+        <div class="ending-actions">
+          <button class="choice-btn ending-action" @click="handleRestartLink">
+            <span class="choice-id">R1</span>
+            <span class="choice-copy">重新接入链路，开始下一轮回响</span>
+          </button>
+          <button class="choice-btn ending-action ending-action-muted" @click="handleExit">
+            <span class="choice-id">R2</span>
+            <span class="choice-copy">关闭链路，返回封面</span>
+          </button>
+        </div>
+      </div>
+    </Transition>
+
     <!-- 点击提示 -->
-    <div class="click-hint" v-if="isExploring && !signalPopup">CLICK TERRAIN TO DISTURB</div>
+    <div
+      class="click-hint"
+      v-if="isExploring && signalsArmed && !activeTransmission && !bufferingTransmission && !endingPanel && !introBriefing"
+    >
+      CLICK TERRAIN TO DROP ROUTE MARKERS
+    </div>
 
     <!-- 涟漪 Canvas 覆盖层 -->
     <canvas ref="rippleEl" class="ripple-canvas"></canvas>
@@ -84,480 +298,119 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue';
-import * as THREE from 'three';
+import { computed, onMounted, onUnmounted, ref } from 'vue';
 import gsap from 'gsap';
+import { useTechNarrative } from '@/composables/useTechNarrative';
+import { useTechScene } from '@/composables/useTechScene';
 
 const emit = defineEmits<{ (e: 'explore-mode', active: boolean): void }>();
 
 const canvasEl = ref<HTMLCanvasElement | null>(null);
 const contentEl = ref<HTMLDivElement | null>(null);
 const exploreHudEl = ref<HTMLDivElement | null>(null);
+const rippleEl = ref<HTMLCanvasElement | null>(null);
 
 const isExploring = ref(false);
 const tourSpeed = ref(1.0);
+const routeMarkers = ref(0);
+const introTransitionActive = ref(false);
+let introTransitionTimer: ReturnType<typeof setTimeout> | null = null;
+let introTransitionResetTimer: ReturnType<typeof setTimeout> | null = null;
+let initialWindowTimer: ReturnType<typeof setTimeout> | null = null;
+const {
+  activeTransmission,
+  advanceIntroBriefing,
+  bufferingTransmission,
+  completedSignals,
+  dataLines,
+  dismissNarrative,
+  endingPanel,
+  environmentMode,
+  introBriefing,
+  introBriefingIndex,
+  linkStatus,
+  openTransmission,
+  openPendingTransmission,
+  pendingSignals,
+  pendingTransmission,
+  performPrepAction,
+  resetSession,
+  sceneCue,
+  sendAdvice,
+  signalsArmed,
+  startIntroBriefing,
+  statDisplay,
+  stats,
+  vectorLabel,
+} = useTechNarrative({
+  isExploring,
+  routeMarkers,
+});
 
-// ── 信号节点 ──
-interface SignalNode {
-  id: string;
-  pos: THREE.Vector3;
-  text: string;
-  triggered: boolean;
-  mesh?: THREE.Mesh;
-  light?: THREE.PointLight;
-}
+const {
+  animateScene,
+  disposeScene,
+  flyToTourStart,
+  initScene,
+  initializeRippleCanvas,
+  onCanvasClick,
+  onMouseMove,
+  onResize,
+  playIntroSequence,
+  resetSessionVisuals,
+  resetTour,
+  returnCameraHome,
+} = useTechScene({
+  activeTransmission,
+  canvasEl,
+  completedSignals,
+  isExploring,
+  onSignalTrigger: openTransmission,
+  environmentMode,
+  rippleEl,
+  routeMarkers,
+  sceneCue,
+  signalsArmed,
+  tourSpeed,
+});
 
-const SIGNAL_NODES: SignalNode[] = [
-  {
-    id: 'Ω-01', pos: new THREE.Vector3(-7, 2, 8),
-    text: '...它不是第一次了<br/>我们在 <span class="hl">第三纪元</span> 就测量到这个频率<br/><em>但当时没有人活着出来</em>',
-    triggered: false,
-  },
-  {
-    id: 'Ψ-02', pos: new THREE.Vector3(0, 3.5, 1),
-    text: '信号源：<span class="hl">未知深度</span><br/>内容：「醒来。你找到了正确的山。」<br/>发送时间：<em>-∞ 年前</em>',
-    triggered: false,
-  },
-  {
-    id: 'Δ-03', pos: new THREE.Vector3(7, 2, 7),
-    text: '此处地磁异常<br/>建议 <span class="hl">立即撤离</span><br/><em>——最后一次收到此警告的人已不存在</em>',
-    triggered: false,
-  },
-  {
-    id: 'Λ-04', pos: new THREE.Vector3(-5, 3, 3),
-    text: '形态分析完成：<span class="hl">非欧几里得结构</span><br/>山脉不符合任何已知地质模型<br/><em>它在生长</em>',
-    triggered: false,
-  },
-  {
-    id: 'X-05', pos: new THREE.Vector3(4, 5, 16),
-    text: '从这里能看见它<br/>那个 <span class="hl">太阳</span> 不是太阳<br/><em>请不要继续向前</em>',
-    triggered: false,
-  },
-];
-
-const signalPopup = ref<{ id: string; text: string; dist: string } | null>(null);
-let signalTimer: ReturnType<typeof setTimeout> | null = null;
-const lastTriggeredSignal = ref('');
-
-// ── 涟漪 ──
-const rippleEl = ref<HTMLCanvasElement | null>(null);
-interface Ripple { x: number; y: number; r: number; maxR: number; alpha: number; }
-const ripples: Ripple[] = [];
-let rippleCtx: CanvasRenderingContext2D | null = null;
-const raycaster = new THREE.Raycaster();
-const mouseNDC = new THREE.Vector2();
+const pageStateClass = computed(() => `mode-${environmentMode.value}`);
+const introStepsCount = 3;
+const introRevealLevel = computed(() => {
+  if (!isExploring.value) return 0.04;
+  if (introBriefingIndex.value === null) return 1;
+  return [0.12, 0.32, 0.58][introBriefingIndex.value] ?? 0.12;
+});
+const introShroudVisible = computed(() => introRevealLevel.value < 1);
+const showCornerMatte = computed(() => isExploring.value && !endingPanel.value);
+const canOpenPendingWindow = computed(() => (
+  Boolean(pendingTransmission.value?.windowReady) && (pendingTransmission.value?.progress ?? 0) > 0
+));
+const introShroudStyle = computed(() => {
+  const radius = 8 + introRevealLevel.value * 60;
+  const softA = Math.max(radius - 18, 0);
+  const softB = Math.max(radius - 8, 0);
+  return {
+    background: `radial-gradient(circle at 50% 56%, rgba(3, 2, 5, 0) 0%, rgba(3, 2, 5, 0.05) ${softA}%, rgba(3, 2, 5, 0.22) ${softB}%, rgba(3, 2, 5, 0.68) ${radius}%, rgba(1, 1, 4, 0.98) 100%)`,
+  };
+});
 
 const currentDate = computed(() => {
   const now = new Date();
   return `${now.getFullYear()}.${String(now.getMonth() + 1).padStart(2, '0')}.${String(now.getDate()).padStart(2, '0')}`;
 });
 
-const dataLines = [
-  'SYS::BREACH_DETECTED............',
-  'ENTITY_CLASS: [REDACTED]',
-  'WARNING: DO_NOT_LOOK_DIRECTLY',
-  'FREQ: 0.000███ Hz',
-  'SIGNAL_ORIGIN: UNKNOWN',
-  'CONTAINMENT: FAILED',
-];
-
-// ── Three.js 场景 ──
-let renderer: THREE.WebGLRenderer;
-let scene: THREE.Scene;
-let camera: THREE.PerspectiveCamera;
-let animFrameId: number;
-
-let terrainOriginalY: Float32Array;
-let terrainMesh: THREE.Mesh;
-let wireMesh: THREE.Mesh;
-let sunMesh: THREE.Mesh;
-let sunCorona: THREE.Mesh;
-let sunRays: THREE.Mesh[] = [];
-let clock: THREE.Clock;
-
-// 自动巡游路径
-let tourT = 0;  // 路径参数 0~1 循环
-const TOUR_WAYPOINTS = [
-  { x: -10, y: 4,  z: 14, lx:  0, ly: 1, lz: -5 },
-  { x:  -6, y: 2.5, z:  6, lx: -4, ly: 2, lz:  0 },
-  { x:   0, y: 3,  z:  2, lx:  0, ly: 3, lz: -8 },
-  { x:   7, y: 2.5, z:  6, lx:  4, ly: 2, lz:  0 },
-  { x:  10, y: 4,  z: 14, lx:  0, ly: 1, lz: -5 },
-  { x:   4, y: 6,  z: 18, lx:  0, ly: 2, lz:  0 },
-  { x: -10, y: 4,  z: 14, lx:  0, ly: 1, lz: -5 }, // 回到起点形成循环
-];
-
-const GRID_W = 120;
-const GRID_H = 80;
-const TERRAIN_W = 40;
-const TERRAIN_H = 26;
-
-function fbm(x: number, z: number): number {
-  let val = 0;
-  let amp = 1.0;
-  let freq = 1.0;
-  const max_amp = [1.0, 0.52, 0.52*0.52, 0.52*0.52*0.52, 0.52*0.52*0.52*0.52];
-  const totalAmp = max_amp.reduce((a, b) => a + b, 0);
-  const octaves = 5;
-  for (let i = 0; i < octaves; i++) {
-    val += Math.sin(x * freq * 0.4 + freq) * Math.cos(z * freq * 0.35 + freq * 0.7) * amp;
-    val += Math.sin(x * freq * 0.7 + freq * 2.1) * Math.sin(z * freq * 0.6 + freq * 1.3) * amp * 0.5;
-    amp *= 0.52;
-    freq *= 2.1;
-  }
-  return val / (totalAmp * 1.5);
-}
-
-const initScene = () => {
-  if (!canvasEl.value) return;
-  clock = new THREE.Clock();
-
-  renderer = new THREE.WebGLRenderer({ canvas: canvasEl.value, antialias: true, alpha: false });
-  renderer.setSize(window.innerWidth, window.innerHeight);
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-  renderer.setClearColor(0x030205, 1);
-  renderer.shadowMap.enabled = true;
-
-  scene = new THREE.Scene();
-  scene.fog = new THREE.FogExp2(0x0a0005, 0.022);
-
-  camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 200);
-  camera.position.set(0, 6, 18);
-  camera.lookAt(0, 1, 0);
-
-  buildTerrain();
-  buildSun();
-  buildAtmosphere();
-  buildSignalNodes();
-};
-
-const buildTerrain = () => {
-  const geo = new THREE.PlaneGeometry(TERRAIN_W, TERRAIN_H, GRID_W, GRID_H);
-  geo.rotateX(-Math.PI / 2);
-
-  const pos = geo.attributes.position as THREE.BufferAttribute;
-  const count = pos.count;
-  terrainOriginalY = new Float32Array(count);
-
-  for (let i = 0; i < count; i++) {
-    const x = pos.getX(i);
-    const z = pos.getZ(i);
-    const ridge = Math.exp(-((z + 2) ** 2) / 40) * 3.5;
-    const h = fbm(x, z) * 4 + ridge;
-    const y = Math.max(h, -0.5);
-    pos.setY(i, y);
-    terrainOriginalY[i] = y;
-  }
-  geo.computeVertexNormals();
-
-  // 实体面
-  const faceMat = new THREE.MeshStandardMaterial({
-    color: 0x3a1a12,
-    roughness: 0.9,
-    metalness: 0.15,
-    emissive: new THREE.Color(0x2a0808),
-    emissiveIntensity: 1.2,
-    side: THREE.FrontSide,
-  });
-  terrainMesh = new THREE.Mesh(geo, faceMat);
-  terrainMesh.receiveShadow = true;
-  scene.add(terrainMesh);
-
-  // 线框层
-  const wireGeo = geo.clone();
-  const wireMat = new THREE.MeshBasicMaterial({
-    color: 0x22ff66,
-    wireframe: true,
-    transparent: true,
-    opacity: 0.38,
-  });
-  wireMesh = new THREE.Mesh(wireGeo, wireMat);
-  scene.add(wireMesh);
-
-  // 深处紫色线框
-  const wireGeo2 = geo.clone();
-  const pos2 = wireGeo2.attributes.position as THREE.BufferAttribute;
-  for (let i = 0; i < pos2.count; i++) {
-    pos2.setY(i, pos2.getY(i) - 0.08);
-  }
-  wireGeo2.computeVertexNormals();
-  scene.add(new THREE.Mesh(wireGeo2, new THREE.MeshBasicMaterial({
-    color: 0x8800ff,
-    wireframe: true,
-    transparent: true,
-    opacity: 0.07,
-  })));
-
-  const dirLight = new THREE.DirectionalLight(0xff6622, 2.5);
-  dirLight.position.set(0, 20, -15);
-  dirLight.castShadow = true;
-  scene.add(dirLight);
-
-  // 正面补光（让山脸正面可见）
-  const fillLight = new THREE.DirectionalLight(0xff3300, 1.4);
-  fillLight.position.set(0, 5, 20);
-  scene.add(fillLight);
-
-  scene.add(new THREE.AmbientLight(0x331122, 2.5));
-
-  const crackLight = new THREE.PointLight(0xff2200, 8, 20);
-  crackLight.position.set(2, 0.5, 2);
-  scene.add(crackLight);
-};
-
-const buildSun = () => {
-  const sunGeo = new THREE.SphereGeometry(2.2, 32, 32);
-  sunMesh = new THREE.Mesh(sunGeo, new THREE.MeshBasicMaterial({ color: 0xcc2200 }));
-  sunMesh.position.set(8, 14, -25);
-  scene.add(sunMesh);
-
-  const coronaGeo = new THREE.SphereGeometry(3.2, 32, 32);
-  sunCorona = new THREE.Mesh(coronaGeo, new THREE.MeshBasicMaterial({
-    color: 0xff3300,
-    transparent: true,
-    opacity: 0.15,
-    side: THREE.BackSide,
-  }));
-  sunMesh.add(sunCorona);
-
-  sunMesh.add(new THREE.Mesh(
-    new THREE.SphereGeometry(5.5, 32, 32),
-    new THREE.MeshBasicMaterial({ color: 0x660011, transparent: true, opacity: 0.07, side: THREE.BackSide })
-  ));
-
-  for (let i = 0; i < 12; i++) {
-    const angle = (i / 12) * Math.PI * 2;
-    const len = 3 + Math.random() * 3;
-    const ray = new THREE.Mesh(
-      new THREE.PlaneGeometry(0.15 + Math.random() * 0.2, len),
-      new THREE.MeshBasicMaterial({
-        color: 0xff2200,
-        transparent: true,
-        opacity: 0.12 + Math.random() * 0.1,
-        side: THREE.DoubleSide,
-      })
-    );
-    ray.rotation.z = angle;
-    ray.position.set(
-      Math.cos(angle) * (2.8 + len / 2),
-      Math.sin(angle) * (2.8 + len / 2),
-      0
-    );
-    sunRays.push(ray);
-    sunMesh.add(ray);
-  }
-};
-
-const buildAtmosphere = () => {
-  const haze = new THREE.Mesh(
-    new THREE.PlaneGeometry(200, 30),
-    new THREE.MeshBasicMaterial({ color: 0x550010, transparent: true, opacity: 0.18, depthWrite: false, side: THREE.DoubleSide })
-  );
-  haze.rotation.x = Math.PI / 2;
-  haze.position.set(0, 0.1, -10);
-  scene.add(haze);
-
-  const starCount = 300;
-  const starGeo = new THREE.BufferGeometry();
-  const starPos = new Float32Array(starCount * 3);
-  for (let i = 0; i < starCount; i++) {
-    starPos[i * 3]     = (Math.random() - 0.5) * 160;
-    starPos[i * 3 + 1] = Math.random() * 40 + 5;
-    starPos[i * 3 + 2] = (Math.random() - 0.5) * 80 - 15;
-  }
-  starGeo.setAttribute('position', new THREE.BufferAttribute(starPos, 3));
-  scene.add(new THREE.Points(starGeo, new THREE.PointsMaterial({ color: 0xffd080, size: 0.1, transparent: true, opacity: 0.5 })));
-
-  for (let t = 0; t < 6; t++) {
-    const points: THREE.Vector3[] = [];
-    const bx = (Math.random() - 0.5) * 16;
-    const bz = (Math.random() - 0.5) * 8 - 2;
-    for (let s = 0; s <= 20; s++) {
-      const p = s / 20;
-      points.push(new THREE.Vector3(
-        bx + Math.sin(p * Math.PI * 3 + t) * p * 1.5,
-        p * (4 + Math.random() * 3),
-        bz + Math.cos(p * Math.PI * 2.5 + t * 0.7) * p * 1.2,
-      ));
-    }
-    const curve = new THREE.CatmullRomCurve3(points);
-    scene.add(new THREE.Mesh(
-      new THREE.TubeGeometry(curve, 30, 0.03 + Math.random() * 0.04, 6, false),
-      new THREE.MeshBasicMaterial({ color: t % 2 === 0 ? 0x44ff88 : 0x8800ff, transparent: true, opacity: 0.25 + Math.random() * 0.2 })
-    ));
-  }
-};
-
-const buildSignalNodes = () => {
-  SIGNAL_NODES.forEach((node) => {
-    // 发光小球
-    const geo = new THREE.SphereGeometry(0.18, 16, 16);
-    const mat = new THREE.MeshBasicMaterial({ color: 0x00ffaa, transparent: true, opacity: 0.9 });
-    const mesh = new THREE.Mesh(geo, mat);
-    mesh.position.copy(node.pos);
-    scene.add(mesh);
-    node.mesh = mesh;
-
-    // 外层光晕环
-    const ringGeo = new THREE.TorusGeometry(0.35, 0.03, 8, 32);
-    const ringMat = new THREE.MeshBasicMaterial({ color: 0x00ffaa, transparent: true, opacity: 0.3 });
-    const ring = new THREE.Mesh(ringGeo, ringMat);
-    ring.position.copy(node.pos);
-    scene.add(ring);
-
-    // 点光源
-    const light = new THREE.PointLight(0x00ffaa, 2, 6);
-    light.position.copy(node.pos);
-    scene.add(light);
-    node.light = light;
-  });
-};
-
-let mouseX = 0;
-const onMouseMove = (e: MouseEvent) => {
-  mouseX = (e.clientX / window.innerWidth - 0.5) * 2;
-};
-const onResize = () => {
-  if (!camera || !renderer) return;
-  camera.aspect = window.innerWidth / window.innerHeight;
-  camera.updateProjectionMatrix();
-  renderer.setSize(window.innerWidth, window.innerHeight);
-};
-
-// 在两个路径点之间做 Catmull-Rom 插值
-function catmullRom(p0: number, p1: number, p2: number, p3: number, t: number): number {
-  return 0.5 * (
-    (2 * p1) +
-    (-p0 + p2) * t +
-    (2*p0 - 5*p1 + 4*p2 - p3) * t * t +
-    (-p0 + 3*p1 - 3*p2 + p3) * t * t * t
-  );
-}
-
-function sampleTourPath(globalT: number) {
-  const pts = TOUR_WAYPOINTS;
-  const segments = pts.length - 1;
-  const scaled = ((globalT % 1) + 1) % 1 * segments;
-  const seg = Math.floor(scaled);
-  const lt = scaled - seg;
-  const i0 = Math.max(seg - 1, 0);
-  const i1 = seg;
-  const i2 = Math.min(seg + 1, pts.length - 1);
-  const i3 = Math.min(seg + 2, pts.length - 1);
-  return {
-    x:  catmullRom(pts[i0].x,  pts[i1].x,  pts[i2].x,  pts[i3].x,  lt),
-    y:  catmullRom(pts[i0].y,  pts[i1].y,  pts[i2].y,  pts[i3].y,  lt),
-    z:  catmullRom(pts[i0].z,  pts[i1].z,  pts[i2].z,  pts[i3].z,  lt),
-    lx: catmullRom(pts[i0].lx, pts[i1].lx, pts[i2].lx, pts[i3].lx, lt),
-    ly: catmullRom(pts[i0].ly, pts[i1].ly, pts[i2].ly, pts[i3].ly, lt),
-    lz: catmullRom(pts[i0].lz, pts[i1].lz, pts[i2].lz, pts[i3].lz, lt),
-  };
-}
-
-const animateScene = () => {
-  animFrameId = requestAnimationFrame(animateScene);
-  if (!renderer || !scene || !camera || !wireMesh || !terrainMesh || !sunMesh || !sunCorona) return;
-  const t = clock.getElapsedTime();
-
-  // 地形波动
-  const pos = wireMesh.geometry.attributes.position as THREE.BufferAttribute;
-  const fpos = terrainMesh.geometry.attributes.position as THREE.BufferAttribute;
-  for (let i = 0; i < pos.count; i++) {
-    const x = pos.getX(i);
-    const z = pos.getZ(i);
-    const wave = Math.sin(x * 0.4 + t * 0.6) * 0.18
-               + Math.sin(z * 0.55 + t * 0.45) * 0.14
-               + Math.sin((x + z) * 0.3 + t * 0.8) * 0.1;
-    const ny = terrainOriginalY[i] + wave;
-    pos.setY(i, ny);
-    fpos.setY(i, ny);
-  }
-  pos.needsUpdate = true;
-  fpos.needsUpdate = true;
-  wireMesh.geometry.computeVertexNormals();
-  terrainMesh.geometry.computeVertexNormals();
-
-  // 太阳脉动
-  const pulse = 1 + Math.sin(t * 1.2) * 0.03 + Math.sin(t * 3.7) * 0.01;
-  sunMesh.scale.setScalar(pulse);
-  (sunCorona.material as THREE.MeshBasicMaterial).opacity = 0.10 + Math.sin(t * 0.8) * 0.06;
-  sunRays.forEach((ray, i) => {
-    (ray.material as THREE.MeshBasicMaterial).opacity = 0.06 + Math.sin(t * (1.5 + i * 0.4) + i) * 0.08;
-  });
-
-  if (isExploring.value) {
-    // 自动巡游：沿路径平滑移动
-    tourT += 0.00008 * tourSpeed.value;
-    const p = sampleTourPath(tourT);
-    camera.position.x += (p.x - camera.position.x) * 0.025;
-    camera.position.y += (p.y - camera.position.y) * 0.025;
-    camera.position.z += (p.z - camera.position.z) * 0.025;
-    camera.lookAt(
-      p.lx + Math.sin(t * 0.15) * 0.5,
-      p.ly + Math.sin(t * 0.1) * 0.2,
-      p.lz
-    );
-
-    // 信号节点脉动 + 距离检测
-    SIGNAL_NODES.forEach((node) => {
-      if (!node.mesh || !node.light) return;
-      const pulse = 0.7 + Math.sin(t * 3 + node.pos.x) * 0.3;
-      node.mesh.scale.setScalar(pulse);
-      node.light.intensity = 1.5 + Math.sin(t * 2.5 + node.pos.z) * 1.0;
-
-      // 接近触发（距离 < 3.5）
-      const dist = camera.position.distanceTo(node.pos);
-      if (!node.triggered && dist < 3.5) {
-        node.triggered = true;
-        lastTriggeredSignal.value = node.id;
-        signalPopup.value = { id: node.id, text: node.text, dist: dist.toFixed(1) };
-        if (signalTimer) clearTimeout(signalTimer);
-        signalTimer = setTimeout(() => { signalPopup.value = null; }, 5000);
-      }
-      // 离开后可再触发
-      if (node.triggered && dist > 6) node.triggered = false;
-    });
-
-    // 涟漪动画
-    if (rippleCtx && rippleEl.value) {
-      rippleCtx.clearRect(0, 0, rippleEl.value.width, rippleEl.value.height);
-      for (let i = ripples.length - 1; i >= 0; i--) {
-        const rp = ripples[i];
-        rp.r += 3.5;
-        rp.alpha -= 0.012;
-        if (rp.alpha <= 0) { ripples.splice(i, 1); continue; }
-        rippleCtx.beginPath();
-        rippleCtx.arc(rp.x, rp.y, rp.r, 0, Math.PI * 2);
-        rippleCtx.strokeStyle = `rgba(204, 26, 26, ${rp.alpha})`;
-        rippleCtx.lineWidth = 1.5;
-        rippleCtx.stroke();
-
-        rippleCtx.beginPath();
-        rippleCtx.arc(rp.x, rp.y, rp.r * 0.6, 0, Math.PI * 2);
-        rippleCtx.strokeStyle = `rgba(34, 255, 100, ${rp.alpha * 0.4})`;
-        rippleCtx.lineWidth = 0.8;
-        rippleCtx.stroke();
-      }
-    }
-  } else {
-    // 普通模式：鼠标跟随
-    camera.position.x += (mouseX * 1.5 - camera.position.x) * 0.02;
-    camera.position.y = 6 + Math.sin(t * 0.3) * 0.3;
-    camera.lookAt(0, 1 + Math.sin(t * 0.2) * 0.2, 0);
-  }
-
-  renderer.render(scene, camera);
-};
-
 const handleExplore = () => {
   if (isExploring.value) return;
+
   isExploring.value = true;
   emit('explore-mode', true);
+  resetSession();
+  resetSessionVisuals();
+  resetTour();
+  startIntroBriefing();
+  playIntroSequence();
 
-  // 初始化巡游位置（从当前相机位置出发）
-  tourT = 0;
-
-  // 淡出主内容
   gsap.to(contentEl.value, {
     opacity: 0,
     y: -30,
@@ -576,12 +429,46 @@ const handleExplore = () => {
   }
 };
 
+const handleAcknowledgeIntro = () => {
+  if (introTransitionTimer) clearTimeout(introTransitionTimer);
+  if (introTransitionResetTimer) clearTimeout(introTransitionResetTimer);
+  if (initialWindowTimer) clearTimeout(initialWindowTimer);
+  introTransitionActive.value = true;
+
+  introTransitionTimer = setTimeout(() => {
+    const unlocked = advanceIntroBriefing();
+    if (unlocked) {
+      flyToTourStart();
+      initialWindowTimer = setTimeout(() => {
+        openTransmission('Ω-01', 2.8);
+      }, 2850);
+    }
+  }, 220);
+
+  introTransitionResetTimer = setTimeout(() => {
+    introTransitionActive.value = false;
+  }, 620);
+};
+
+const handleSendAdvice = (choice: NonNullable<typeof activeTransmission.value>['choices'][number]) => {
+  sendAdvice(choice);
+};
+
+const handlePrepAction = (actionId: string) => {
+  performPrepAction(actionId);
+};
+
+const handleOpenPendingWindow = () => {
+  openPendingTransmission();
+};
+
 const handleExit = () => {
   if (!isExploring.value) return;
+
   isExploring.value = false;
   emit('explore-mode', false);
+  dismissNarrative();
 
-  // 淡出探索 HUD
   gsap.to(exploreHudEl.value, {
     opacity: 0,
     y: 20,
@@ -599,39 +486,21 @@ const handleExit = () => {
     );
   }
 
-  // 相机飞回原位
-  gsap.to(camera.position, { x: 0, y: 6, z: 18, duration: 2, ease: 'power3.inOut' });
+  returnCameraHome();
+};
+
+const handleRestartLink = () => {
+  if (!isExploring.value) return;
+
+  resetSession();
+  resetSessionVisuals();
+  resetTour();
+  startIntroBriefing();
+  playIntroSequence();
 };
 
 const onKeyDown = (e: KeyboardEvent) => {
   if (e.key === 'Escape' && isExploring.value) handleExit();
-};
-
-const onCanvasClick = (e: MouseEvent) => {
-  if (!isExploring.value || !canvasEl.value) return;
-  if (!camera || !terrainMesh || !renderer) return;
-
-  // 2D 涟漪
-  if (rippleEl.value) {
-    ripples.push({ x: e.clientX, y: e.clientY, r: 0, maxR: 120, alpha: 0.7 });
-  }
-
-  // 3D Raycaster 打到地形，震动相机
-  mouseNDC.set(
-    (e.clientX / window.innerWidth) * 2 - 1,
-    -(e.clientY / window.innerHeight) * 2 + 1
-  );
-  raycaster.setFromCamera(mouseNDC, camera);
-  const hits = raycaster.intersectObject(terrainMesh);
-  if (hits.length > 0) {
-    // 短暂震动相机（仅偏移量，不干扰巡游主路径）
-    const shakeX = (Math.random() - 0.5) * 0.35;
-    const shakeY = (Math.random() - 0.5) * 0.2;
-    gsap.timeline()
-      .to(camera.position, { x: `+=${shakeX}`, y: `+=${shakeY}`, duration: 0.07, ease: 'none' })
-      .to(camera.position, { x: `-=${shakeX * 0.8}`, y: `-=${shakeY * 0.8}`, duration: 0.07, ease: 'none' })
-      .to(camera.position, { x: `+=${shakeX * 0.15}`, y: `+=${shakeY * 0.15}`, duration: 0.1, ease: 'none' });
-  }
 };
 
 onMounted(() => {
@@ -640,24 +509,20 @@ onMounted(() => {
   window.addEventListener('mousemove', onMouseMove);
   window.addEventListener('resize', onResize);
   window.addEventListener('keydown', onKeyDown);
-
-  // 涟漪 Canvas 初始化
-  if (rippleEl.value) {
-    rippleEl.value.width = window.innerWidth;
-    rippleEl.value.height = window.innerHeight;
-    rippleCtx = rippleEl.value.getContext('2d');
-  }
-  window.addEventListener('click', onCanvasClick);
+  initializeRippleCanvas();
+  canvasEl.value?.addEventListener('click', onCanvasClick);
 });
 
 onUnmounted(() => {
-  cancelAnimationFrame(animFrameId);
+  if (introTransitionTimer) clearTimeout(introTransitionTimer);
+  if (introTransitionResetTimer) clearTimeout(introTransitionResetTimer);
+  if (initialWindowTimer) clearTimeout(initialWindowTimer);
   window.removeEventListener('mousemove', onMouseMove);
   window.removeEventListener('resize', onResize);
   window.removeEventListener('keydown', onKeyDown);
-  window.removeEventListener('click', onCanvasClick);
-  if (signalTimer) clearTimeout(signalTimer);
-  renderer?.dispose();
+  canvasEl.value?.removeEventListener('click', onCanvasClick);
+  dismissNarrative();
+  disposeScene();
 });
 </script>
 
@@ -682,6 +547,43 @@ onUnmounted(() => {
   z-index: 0;
 }
 
+.intro-shroud {
+  position: absolute;
+  inset: 0;
+  z-index: 34;
+  pointer-events: none;
+  transition: background 0.85s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.intro-transition {
+  position: absolute;
+  inset: 0;
+  z-index: 35;
+  pointer-events: none;
+  background:
+    radial-gradient(circle at 50% 56%, rgba(255, 244, 198, 0.02) 0%, rgba(255, 244, 198, 0.035) 18%, rgba(3, 2, 5, 0.18) 34%, rgba(3, 2, 5, 0.6) 62%, rgba(1, 1, 4, 0.92) 100%);
+  animation: shroudFlow 0.8s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+.corner-matte {
+  position: absolute;
+  inset: 0;
+  z-index: 33;
+  pointer-events: none;
+  background:
+    radial-gradient(circle at 0 0, rgba(0, 0, 0, 0.82) 0, rgba(0, 0, 0, 0.36) 16%, transparent 34%),
+    radial-gradient(circle at 100% 0, rgba(0, 0, 0, 0.82) 0, rgba(0, 0, 0, 0.36) 16%, transparent 34%),
+    radial-gradient(circle at 0 100%, rgba(0, 0, 0, 0.82) 0, rgba(0, 0, 0, 0.36) 16%, transparent 34%),
+    radial-gradient(circle at 100% 100%, rgba(0, 0, 0, 0.82) 0, rgba(0, 0, 0, 0.36) 16%, transparent 34%);
+  opacity: 0.94;
+  transition: opacity 0.45s ease;
+  animation: matteBreath 7.5s ease-in-out infinite;
+}
+
+.corner-matte-intro {
+  opacity: 1;
+}
+
 .scanline-overlay {
   position: absolute;
   inset: 0;
@@ -696,6 +598,674 @@ onUnmounted(() => {
   box-shadow: inset 0 0 80px rgba(204,0,0,0.12), inset 0 0 30px rgba(80,0,120,0.15);
   pointer-events: none;
   z-index: 50;
+}
+
+.weather-overlay,
+.noise-overlay,
+.scene-cue {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.weather-overlay {
+  z-index: 38;
+  opacity: 0;
+  transition: opacity 0.4s ease, background 0.4s ease;
+}
+
+.noise-overlay {
+  z-index: 49;
+  opacity: 0.16;
+  mix-blend-mode: screen;
+  background-image:
+    radial-gradient(circle at 20% 20%, rgba(255,255,255,0.16) 0 1px, transparent 1px),
+    radial-gradient(circle at 80% 40%, rgba(255,255,255,0.08) 0 1px, transparent 1px),
+    radial-gradient(circle at 40% 80%, rgba(255,255,255,0.12) 0 1px, transparent 1px);
+  background-size: 120px 120px, 160px 160px, 140px 140px;
+  animation: noiseDrift 8s linear infinite;
+}
+
+@keyframes noiseDrift {
+  from { transform: translate3d(0, 0, 0); }
+  to { transform: translate3d(-30px, 18px, 0); }
+}
+
+@keyframes matteBreath {
+  0%, 100% { opacity: 0.92; transform: scale(1); }
+  50% { opacity: 0.985; transform: scale(1.012); }
+}
+
+@keyframes irisTransition {
+  0% {
+    opacity: 0;
+    transform: scale(1.04);
+    filter: blur(12px);
+  }
+  35% {
+    opacity: 1;
+    transform: scale(1);
+    filter: blur(2px);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(0.98);
+    filter: blur(0);
+  }
+}
+
+@keyframes shroudFlow {
+  0% {
+    opacity: 0;
+    transform: scale(1.08);
+    filter: blur(16px);
+  }
+  35% {
+    opacity: 0.8;
+    transform: scale(1.03);
+    filter: blur(8px);
+  }
+  70% {
+    opacity: 0.42;
+    transform: scale(0.995);
+    filter: blur(2px);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(0.98);
+    filter: blur(0);
+  }
+}
+
+.mode-quake .weather-overlay {
+  opacity: 0.28;
+  background:
+    linear-gradient(135deg, rgba(255, 124, 64, 0.18), transparent 45%),
+    repeating-linear-gradient(-24deg, transparent 0 18px, rgba(255, 219, 177, 0.08) 18px 20px);
+}
+
+.mode-storm .weather-overlay {
+  opacity: 0.34;
+  background:
+    linear-gradient(180deg, rgba(16, 35, 54, 0.08), rgba(72, 147, 214, 0.18)),
+    repeating-linear-gradient(-18deg, transparent 0 14px, rgba(175, 223, 255, 0.12) 14px 16px);
+  animation: rainSweep 0.9s linear infinite;
+}
+
+.mode-fissure .weather-overlay {
+  opacity: 0.42;
+  background:
+    radial-gradient(circle at 50% 62%, rgba(77, 216, 255, 0.28), transparent 30%),
+    linear-gradient(90deg, transparent 0 42%, rgba(7, 18, 28, 0.92) 42% 58%, transparent 58% 100%);
+}
+
+.mode-whiteout .weather-overlay {
+  opacity: 0.48;
+  background:
+    radial-gradient(circle at 20% 25%, rgba(255,255,255,0.45), transparent 22%),
+    linear-gradient(180deg, rgba(230, 240, 248, 0.48), rgba(180, 195, 210, 0.24));
+}
+
+.mode-magnetic .weather-overlay {
+  opacity: 0.3;
+  background:
+    linear-gradient(90deg, rgba(255, 72, 214, 0.1), transparent 35%, rgba(123, 224, 255, 0.12) 65%, transparent),
+    repeating-linear-gradient(0deg, transparent 0 4px, rgba(123,224,255,0.05) 4px 5px);
+}
+
+.mode-skyfold .weather-overlay {
+  opacity: 0.28;
+  background:
+    radial-gradient(circle at 50% 10%, rgba(255, 239, 181, 0.28), transparent 22%),
+    linear-gradient(180deg, rgba(16, 6, 24, 0.12), rgba(42, 11, 38, 0.28)),
+    repeating-linear-gradient(90deg, transparent 0 70px, rgba(255, 214, 109, 0.06) 70px 71px);
+}
+
+@keyframes rainSweep {
+  from { background-position: 0 0, 0 0; }
+  to { background-position: 0 0, 24px 80px; }
+}
+
+.scene-cue {
+  z-index: 58;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.cue-weather {
+  position: absolute;
+  inset: 0;
+  opacity: 0.9;
+}
+
+.cue-frame {
+  position: relative;
+  width: min(620px, 86vw);
+  padding: 24px 26px;
+  background: rgba(6, 10, 16, 0.68);
+  border: 1px solid rgba(123, 224, 255, 0.24);
+  box-shadow: 0 22px 60px rgba(0, 0, 0, 0.32);
+  backdrop-filter: blur(10px);
+}
+
+.cue-kicker {
+  font-size: 9px;
+  letter-spacing: 0.24em;
+  color: rgba(123, 224, 255, 0.7);
+  margin-bottom: 12px;
+}
+
+.cue-title {
+  font-family: 'Noto Serif SC', serif;
+  font-size: clamp(28px, 4vw, 42px);
+  line-height: 1.08;
+  color: #f8e2a4;
+  margin-bottom: 12px;
+}
+
+.cue-body {
+  max-width: 42rem;
+  font-size: 14px;
+  line-height: 1.9;
+  color: rgba(248, 226, 164, 0.86);
+}
+
+.cue-quake .cue-weather {
+  background:
+    linear-gradient(90deg, transparent 0 30%, rgba(255, 155, 105, 0.18) 30% 32%, transparent 32% 100%),
+    linear-gradient(145deg, rgba(255, 96, 48, 0.2), transparent 40%);
+  animation: quakeFlash 0.35s steps(2, end) infinite;
+}
+
+.cue-storm .cue-weather {
+  background:
+    linear-gradient(180deg, rgba(0, 0, 0, 0.05), rgba(123, 224, 255, 0.12)),
+    repeating-linear-gradient(-15deg, transparent 0 18px, rgba(216, 243, 255, 0.12) 18px 20px);
+  animation: rainSweep 0.7s linear infinite;
+}
+
+.cue-fissure .cue-weather {
+  background:
+    radial-gradient(circle at 50% 55%, rgba(106, 227, 255, 0.22), transparent 22%),
+    linear-gradient(90deg, transparent 0 44%, rgba(5, 14, 24, 0.95) 44% 56%, transparent 56%);
+}
+
+.cue-whiteout .cue-weather {
+  background:
+    radial-gradient(circle at 30% 35%, rgba(255,255,255,0.34), transparent 18%),
+    radial-gradient(circle at 70% 62%, rgba(255,255,255,0.2), transparent 20%),
+    linear-gradient(180deg, rgba(232, 239, 245, 0.3), rgba(168, 180, 194, 0.18));
+}
+
+.cue-magnetic .cue-weather {
+  background:
+    linear-gradient(90deg, rgba(255, 72, 214, 0.16), transparent 38%, rgba(123, 224, 255, 0.16) 62%, transparent),
+    repeating-linear-gradient(0deg, transparent 0 5px, rgba(255,255,255,0.05) 5px 6px);
+  animation: magneticShift 0.9s linear infinite;
+}
+
+.cue-skyfold .cue-weather {
+  background:
+    radial-gradient(circle at 50% 12%, rgba(255, 239, 181, 0.28), transparent 18%),
+    repeating-linear-gradient(90deg, transparent 0 64px, rgba(255, 214, 109, 0.08) 64px 65px),
+    linear-gradient(180deg, rgba(20, 8, 25, 0.08), rgba(64, 16, 58, 0.2));
+}
+
+@keyframes quakeFlash {
+  0%, 100% { opacity: 0.7; transform: translateX(0); }
+  50% { opacity: 1; transform: translateX(6px); }
+}
+
+@keyframes magneticShift {
+  0%, 100% { transform: translateX(0); opacity: 0.9; }
+  50% { transform: translateX(8px); opacity: 0.65; }
+}
+
+.briefing-panel {
+  position: absolute;
+  left: 50%;
+  bottom: 44px;
+  transform: translateX(-50%);
+  z-index: 78;
+  width: min(560px, 84vw);
+  padding: 18px 20px;
+  background: linear-gradient(180deg, rgba(4, 6, 10, 0.44), rgba(5, 7, 11, 0.8));
+  border: 1px solid rgba(123, 224, 255, 0.16);
+  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.28);
+  backdrop-filter: blur(12px);
+}
+
+.briefing-kicker {
+  font-size: 10px;
+  letter-spacing: 0.24em;
+  color: rgba(123, 224, 255, 0.72);
+  margin-bottom: 14px;
+}
+
+.briefing-title {
+  font-family: 'Noto Serif SC', serif;
+  font-size: clamp(24px, 3vw, 34px);
+  line-height: 1.1;
+  color: #f8e2a4;
+  margin-bottom: 10px;
+}
+
+.briefing-copy {
+  font-size: 14px;
+  line-height: 1.85;
+  color: rgba(248, 226, 164, 0.84);
+  margin-bottom: 12px;
+  max-width: 42rem;
+}
+
+.briefing-progress {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.progress-dot {
+  width: 28px;
+  height: 2px;
+  background: rgba(123, 224, 255, 0.18);
+  transition: background 0.25s ease, transform 0.25s ease;
+}
+
+.progress-dot.active {
+  background: #7be0ff;
+  transform: scaleX(1.12);
+}
+
+.briefing-action {
+  background: rgba(10, 18, 28, 0.85);
+}
+
+.prep-panel {
+  position: absolute;
+  left: 50%;
+  bottom: 42px;
+  transform: translateX(-50%);
+  z-index: 76;
+  width: min(560px, 84vw);
+  padding: 18px 20px;
+  background: rgba(6, 10, 16, 0.7);
+  border: 1px solid rgba(123, 224, 255, 0.18);
+  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.28);
+  backdrop-filter: blur(12px);
+  animation: commsBreath 4.6s ease-in-out infinite;
+}
+
+.prep-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 10px;
+  font-size: 9px;
+  letter-spacing: 0.2em;
+  color: rgba(123, 224, 255, 0.7);
+}
+
+.prep-title {
+  font-family: 'Noto Serif SC', serif;
+  font-size: clamp(24px, 3vw, 34px);
+  line-height: 1.08;
+  color: #f8e2a4;
+  margin-bottom: 10px;
+}
+
+.prep-body {
+  font-size: 13px;
+  line-height: 1.8;
+  color: rgba(248, 226, 164, 0.82);
+  margin-bottom: 12px;
+}
+
+.prep-progress {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.prep-instruction {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 9px 12px;
+  margin-bottom: 14px;
+  background: rgba(10, 18, 28, 0.52);
+  border: 1px solid rgba(123, 224, 255, 0.12);
+  font-size: 11px;
+  line-height: 1.6;
+  color: rgba(248, 226, 164, 0.74);
+}
+
+.prep-instruction-label {
+  flex: 0 0 auto;
+  font-size: 9px;
+  letter-spacing: 0.2em;
+  color: rgba(123, 224, 255, 0.68);
+}
+
+.prep-dot {
+  width: 28px;
+  height: 2px;
+  background: rgba(123, 224, 255, 0.18);
+  transition: background 0.25s ease, transform 0.25s ease;
+}
+
+.prep-dot.active {
+  background: #f8e2a4;
+  transform: scaleX(1.08);
+}
+
+.prep-actions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.prep-action {
+  padding: 12px 10px;
+  background: rgba(10, 18, 28, 0.78);
+  border: 1px solid rgba(123, 224, 255, 0.18);
+  color: rgba(248, 226, 164, 0.88);
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 1.5;
+  cursor: pointer;
+  transition: transform 0.18s ease, border-color 0.18s ease, opacity 0.18s ease;
+}
+
+.prep-action:hover:not(:disabled) {
+  transform: translateY(-2px);
+  border-color: rgba(255, 200, 87, 0.42);
+}
+
+.prep-action.used,
+.prep-action:disabled {
+  opacity: 0.46;
+  cursor: default;
+}
+
+.prep-result {
+  min-height: 1.8em;
+  font-size: 12px;
+  line-height: 1.7;
+  color: rgba(123, 224, 255, 0.8);
+  margin-bottom: 12px;
+}
+
+.prep-confirm {
+  width: 100%;
+  padding: 13px 14px;
+  background: rgba(9, 16, 24, 0.78);
+  border: 1px solid rgba(123, 224, 255, 0.18);
+  color: rgba(170, 199, 214, 0.72);
+  font-family: inherit;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  cursor: not-allowed;
+  transition: border-color 0.18s ease, color 0.18s ease, transform 0.18s ease, background 0.18s ease;
+}
+
+.prep-confirm.ready {
+  background: rgba(10, 18, 28, 0.92);
+  border-color: rgba(255, 200, 87, 0.32);
+  color: rgba(248, 226, 164, 0.92);
+  cursor: pointer;
+}
+
+.prep-confirm.ready:hover {
+  transform: translateY(-1px);
+  border-color: rgba(255, 200, 87, 0.5);
+}
+
+.buffer-panel {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 77;
+  width: min(560px, 82vw);
+  padding: 24px 24px 22px;
+  background: rgba(5, 9, 14, 0.76);
+  border: 1px solid rgba(123, 224, 255, 0.18);
+  box-shadow: 0 26px 80px rgba(0, 0, 0, 0.34);
+  backdrop-filter: blur(16px);
+  overflow: hidden;
+}
+
+.buffer-grid {
+  position: absolute;
+  inset: 0;
+  opacity: 0.28;
+  background:
+    linear-gradient(transparent 95%, rgba(123, 224, 255, 0.08) 95%),
+    linear-gradient(90deg, transparent 95%, rgba(123, 224, 255, 0.07) 95%);
+  background-size: 100% 22px, 22px 100%;
+  mask-image: linear-gradient(180deg, rgba(0, 0, 0, 0.86), transparent);
+  animation: bufferDrift 4.6s linear infinite;
+}
+
+.buffer-header,
+.buffer-title,
+.buffer-lead,
+.buffer-progress,
+.buffer-steps {
+  position: relative;
+  z-index: 1;
+}
+
+.buffer-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 12px;
+  font-size: 9px;
+  letter-spacing: 0.2em;
+  color: rgba(123, 224, 255, 0.72);
+}
+
+.buffer-title {
+  font-family: 'Noto Serif SC', serif;
+  font-size: clamp(26px, 3.2vw, 38px);
+  line-height: 1.05;
+  color: #f8e2a4;
+  margin-bottom: 10px;
+}
+
+.buffer-lead {
+  font-size: 13px;
+  line-height: 1.75;
+  color: rgba(248, 226, 164, 0.84);
+  margin-bottom: 16px;
+}
+
+.buffer-progress {
+  height: 8px;
+  border: 1px solid rgba(123, 224, 255, 0.16);
+  background: rgba(8, 14, 20, 0.8);
+  overflow: hidden;
+  margin-bottom: 18px;
+}
+
+.buffer-progress-fill {
+  width: 100%;
+  height: 100%;
+  transform-origin: left center;
+  background:
+    linear-gradient(90deg, rgba(123, 224, 255, 0.2), rgba(248, 226, 164, 0.84) 50%, rgba(123, 224, 255, 0.2));
+  box-shadow: 0 0 20px rgba(248, 226, 164, 0.18);
+  transition: transform 0.34s ease;
+}
+
+.buffer-steps {
+  display: grid;
+  gap: 8px;
+}
+
+.buffer-step {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  background: rgba(10, 18, 28, 0.42);
+  border: 1px solid rgba(123, 224, 255, 0.08);
+  color: rgba(164, 187, 198, 0.72);
+  font-size: 12px;
+  line-height: 1.6;
+  transition: border-color 0.24s ease, color 0.24s ease, background 0.24s ease;
+}
+
+.buffer-step-index {
+  flex: 0 0 auto;
+  font-size: 9px;
+  letter-spacing: 0.2em;
+  color: rgba(123, 224, 255, 0.54);
+}
+
+.buffer-step.active {
+  background: rgba(14, 24, 36, 0.76);
+  border-color: rgba(248, 226, 164, 0.24);
+  color: rgba(248, 226, 164, 0.9);
+  animation: bufferPulse 1s ease-in-out infinite;
+}
+
+.buffer-step.done {
+  border-color: rgba(123, 224, 255, 0.16);
+  color: rgba(123, 224, 255, 0.82);
+}
+
+.buffer-quake .buffer-progress-fill,
+.buffer-storm .buffer-progress-fill {
+  background:
+    linear-gradient(90deg, rgba(123, 224, 255, 0.12), rgba(248, 226, 164, 0.74) 40%, rgba(123, 224, 255, 0.32));
+}
+
+.buffer-fissure .buffer-progress-fill,
+.buffer-magnetic .buffer-progress-fill,
+.buffer-skyfold .buffer-progress-fill {
+  background:
+    linear-gradient(90deg, rgba(106, 227, 255, 0.16), rgba(248, 226, 164, 0.82) 44%, rgba(255, 145, 243, 0.22));
+}
+
+.cue-enter-active,
+.briefing-enter-active {
+  animation: briefingIn 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.prep-enter-active {
+  animation: briefingIn 0.45s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.buffer-enter-active {
+  animation: bufferIn 0.42s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.cue-enter-active {
+  animation: overlayIn 0.42s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.cue-leave-active,
+.briefing-leave-active {
+  animation: briefingOut 0.25s ease-in forwards;
+}
+
+.prep-leave-active {
+  animation: briefingOut 0.2s ease-in forwards;
+}
+
+.buffer-leave-active {
+  animation: bufferOut 0.22s ease-in forwards;
+}
+
+.cue-leave-active {
+  animation: overlayOut 0.25s ease-in forwards;
+}
+
+@keyframes overlayIn {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+    filter: blur(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+    filter: blur(0);
+  }
+}
+
+@keyframes overlayOut {
+  from {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+}
+
+@keyframes briefingIn {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 18px);
+    filter: blur(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+    filter: blur(0);
+  }
+}
+
+@keyframes bufferIn {
+  from {
+    opacity: 0;
+    transform: translate(-50%, calc(-50% + 18px)) scale(0.985);
+    filter: blur(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+    filter: blur(0);
+  }
+}
+
+@keyframes bufferOut {
+  from {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translate(-50%, calc(-50% - 10px)) scale(1.01);
+  }
+}
+
+@keyframes bufferDrift {
+  from { transform: translate3d(0, 0, 0); }
+  to { transform: translate3d(-22px, 18px, 0); }
+}
+
+@keyframes bufferPulse {
+  0%, 100% { box-shadow: inset 0 0 0 rgba(248, 226, 164, 0); }
+  50% { box-shadow: inset 0 0 24px rgba(248, 226, 164, 0.08); }
+}
+
+@keyframes briefingOut {
+  from {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+  to {
+    opacity: 0;
+    transform: translate(-50%, 12px);
+  }
 }
 
 .hud-corner {
@@ -913,6 +1483,38 @@ onUnmounted(() => {
   opacity: 0;
 }
 
+.link-metrics {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  max-width: min(420px, 72vw);
+}
+
+.metric-chip {
+  min-width: 92px;
+  padding: 10px 12px;
+  border: 1px solid rgba(123, 224, 255, 0.22);
+  background: rgba(3, 2, 5, 0.72);
+  backdrop-filter: blur(6px);
+  box-shadow: inset 0 0 18px rgba(123, 224, 255, 0.04);
+}
+
+.metric-label {
+  display: block;
+  font-size: 8px;
+  letter-spacing: 0.22em;
+  color: rgba(123, 224, 255, 0.55);
+  margin-bottom: 6px;
+}
+
+.metric-value {
+  display: block;
+  font-size: 18px;
+  color: #f6d58c;
+  line-height: 1;
+}
+
 .tour-speed {
   display: flex;
   align-items: center;
@@ -977,53 +1579,158 @@ onUnmounted(() => {
 .exit-btn .btn-bracket { color: #cc1a1a; font-weight: bold; }
 
 /* ── 信号弹窗 ── */
-.signal-popup {
+.comms-popup {
   position: absolute;
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
   z-index: 80;
-  width: min(480px, 85vw);
+  width: min(560px, 88vw);
   background: rgba(3, 2, 5, 0.88);
-  border: 1px solid rgba(0, 255, 170, 0.4);
-  padding: 20px 24px;
+  border: 1px solid rgba(123, 224, 255, 0.34);
+  padding: 22px 24px;
   backdrop-filter: blur(8px);
-  box-shadow: 0 0 30px rgba(0, 255, 170, 0.15), inset 0 0 20px rgba(0, 255, 170, 0.03);
+  box-shadow: 0 0 30px rgba(123, 224, 255, 0.12), inset 0 0 20px rgba(123, 224, 255, 0.03);
+  pointer-events: auto;
+  overflow: hidden;
+  animation: commsBreath 4.6s ease-in-out infinite;
+}
+
+.comms-popup::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(115deg, transparent 0 36%, rgba(123, 224, 255, 0.08) 46%, transparent 58%),
+    repeating-linear-gradient(0deg, transparent 0 3px, rgba(255,255,255,0.02) 3px 4px);
+  mix-blend-mode: screen;
+  opacity: 0.7;
   pointer-events: none;
+  animation: commsSweep 5.5s linear infinite;
 }
 .signal-header {
   display: flex;
   justify-content: space-between;
   font-size: 9px;
   letter-spacing: 0.2em;
-  color: rgba(0, 255, 170, 0.6);
+  color: rgba(123, 224, 255, 0.62);
   margin-bottom: 14px;
-  border-bottom: 1px solid rgba(0, 255, 170, 0.15);
+  border-bottom: 1px solid rgba(123, 224, 255, 0.14);
   padding-bottom: 10px;
 }
-.signal-tag { color: #00ffaa; }
+.signal-tag { color: #7be0ff; }
 .signal-dist { color: rgba(240, 224, 64, 0.5); }
+.signal-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  color: rgba(255, 200, 87, 0.72);
+  text-transform: uppercase;
+}
 .signal-body {
   font-size: 14px;
   line-height: 1.9;
   color: rgba(240, 224, 64, 0.85);
+  margin-bottom: 18px;
 }
 .signal-body :deep(.hl) {
-  color: #cc1a1a;
-  text-shadow: 0 0 8px rgba(204, 26, 26, 0.5);
+  color: #7be0ff;
+  text-shadow: 0 0 8px rgba(123, 224, 255, 0.35);
 }
-.signal-body :deep(em) {
-  color: rgba(240, 224, 64, 0.4);
-  font-style: normal;
-  font-size: 12px;
-  display: block;
-  margin-top: 6px;
-  letter-spacing: 0.05em;
+
+.choice-panel,
+.reply-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
 }
+
+.panel-label {
+  font-size: 9px;
+  letter-spacing: 0.22em;
+  color: rgba(255, 200, 87, 0.72);
+}
+
+.panel-label-reply {
+  margin-top: 4px;
+}
+
+.choice-btn {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 50px 1fr;
+  gap: 14px;
+  align-items: center;
+  text-align: left;
+  padding: 12px 14px;
+  border: 1px solid rgba(123, 224, 255, 0.24);
+  background: rgba(10, 16, 24, 0.78);
+  color: rgba(240, 224, 64, 0.88);
+  cursor: pointer;
+  transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+  font-family: inherit;
+  position: relative;
+  overflow: hidden;
+}
+
+.choice-btn:hover {
+  transform: translateY(-2px);
+  border-color: rgba(255, 200, 87, 0.44);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+}
+
+.choice-id {
+  color: #7be0ff;
+  font-size: 11px;
+  letter-spacing: 0.12em;
+}
+
+.choice-copy {
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.choice-btn.obscured .choice-copy {
+  color: rgba(240, 224, 64, 0.72);
+  text-shadow: 1px 0 rgba(123, 224, 255, 0.28), -1px 0 rgba(255, 90, 160, 0.24);
+  animation: choiceInterference 1.8s steps(2, end) infinite;
+}
+
+.choice-btn.obscured::after {
+  content: 'SIGNAL LOSS';
+  position: absolute;
+  top: 10px;
+  right: 12px;
+  font-size: 8px;
+  letter-spacing: 0.18em;
+  color: rgba(123, 224, 255, 0.58);
+}
+
+.outgoing-copy,
+.incoming-copy {
+  padding: 12px 14px;
+  border: 1px solid rgba(123, 224, 255, 0.18);
+  background: rgba(10, 16, 24, 0.7);
+  font-size: 13px;
+  line-height: 1.7;
+  color: rgba(240, 224, 64, 0.88);
+}
+
+.outgoing-copy {
+  border-color: rgba(255, 200, 87, 0.28);
+}
+
+.incoming-copy.pending {
+  color: rgba(123, 224, 255, 0.72);
+}
+
 .signal-bar {
   margin-top: 14px;
   height: 1px;
-  background: linear-gradient(90deg, #00ffaa, transparent);
+  background: linear-gradient(90deg, #7be0ff, transparent);
   animation: signalScan 2.5s linear infinite;
 }
 @keyframes signalScan {
@@ -1036,12 +1743,162 @@ onUnmounted(() => {
 .signal-enter-active { animation: sigIn 0.4s cubic-bezier(0.16, 1, 0.3, 1); }
 .signal-leave-active { animation: sigOut 0.3s ease-in forwards; }
 @keyframes sigIn {
-  from { opacity: 0; transform: translate(-50%, calc(-50% + 18px)); filter: blur(4px); }
-  to   { opacity: 1; transform: translate(-50%, -50%); filter: blur(0); }
+  0% { opacity: 0; transform: translate(-50%, calc(-50% + 18px)) scale(0.985); filter: blur(7px); }
+  35% { opacity: 0.55; transform: translate(-50%, calc(-50% + 8px)) scale(1.004); filter: blur(2px); }
+  70% { opacity: 0.88; transform: translate(-50%, calc(-50% - 2px)); }
+  100% { opacity: 1; transform: translate(-50%, -50%) scale(1); filter: blur(0); }
 }
 @keyframes sigOut {
   from { opacity: 1; transform: translate(-50%, -50%); }
   to   { opacity: 0; transform: translate(-50%, calc(-50% - 10px)); }
+}
+
+@keyframes commsBreath {
+  0%, 100% { box-shadow: 0 0 30px rgba(123, 224, 255, 0.12), inset 0 0 20px rgba(123, 224, 255, 0.03); }
+  50% { box-shadow: 0 0 38px rgba(123, 224, 255, 0.18), inset 0 0 24px rgba(123, 224, 255, 0.06); }
+}
+
+@keyframes commsSweep {
+  from { transform: translateX(-24%); opacity: 0.3; }
+  50% { opacity: 0.72; }
+  to { transform: translateX(24%); opacity: 0.3; }
+}
+
+@keyframes choiceInterference {
+  0%, 100% { clip-path: inset(0 0 0 0); transform: translateX(0); }
+  33% { clip-path: inset(12% 0 24% 0); transform: translateX(0.5px); }
+  66% { clip-path: inset(44% 0 8% 0); transform: translateX(-0.8px); }
+}
+
+.ending-panel {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 85;
+  width: min(620px, 90vw);
+  padding: 26px 28px;
+  background:
+    linear-gradient(135deg, rgba(10, 16, 24, 0.96), rgba(36, 18, 8, 0.88)),
+    rgba(3, 2, 5, 0.92);
+  border: 1px solid rgba(255, 200, 87, 0.3);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.38), inset 0 0 30px rgba(123, 224, 255, 0.04);
+  backdrop-filter: blur(12px);
+}
+
+.ending-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 12px;
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+
+.ending-kicker {
+  color: #7be0ff;
+}
+
+.ending-vector {
+  color: rgba(255, 200, 87, 0.72);
+}
+
+.ending-title {
+  font-family: 'Noto Serif SC', serif;
+  font-size: clamp(28px, 4vw, 42px);
+  line-height: 1.1;
+  color: #f8e2a4;
+  margin-bottom: 14px;
+}
+
+.ending-summary {
+  font-size: 15px;
+  line-height: 1.9;
+  color: rgba(248, 226, 164, 0.9);
+  margin-bottom: 12px;
+}
+
+.ending-body {
+  font-size: 13px;
+  line-height: 1.85;
+  color: rgba(123, 224, 255, 0.82);
+  padding: 14px 16px;
+  background: rgba(7, 11, 18, 0.55);
+  border: 1px solid rgba(123, 224, 255, 0.18);
+  margin-bottom: 18px;
+}
+
+.ending-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 18px;
+}
+
+.ending-stat {
+  padding: 12px 14px;
+  border: 1px solid rgba(255, 200, 87, 0.18);
+  background: rgba(36, 18, 8, 0.32);
+}
+
+.ending-stat span {
+  display: block;
+  font-size: 8px;
+  letter-spacing: 0.2em;
+  color: rgba(255, 200, 87, 0.66);
+  margin-bottom: 6px;
+}
+
+.ending-stat strong {
+  font-size: 20px;
+  color: #f8e2a4;
+}
+
+.ending-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.ending-action {
+  background: rgba(8, 16, 25, 0.84);
+}
+
+.ending-action-muted {
+  opacity: 0.88;
+}
+
+.ending-enter-active {
+  animation: endingIn 0.45s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.ending-leave-active {
+  animation: endingOut 0.28s ease-in forwards;
+}
+
+@keyframes endingIn {
+  from {
+    opacity: 0;
+    transform: translate(-50%, calc(-50% + 18px)) scale(0.98);
+    filter: blur(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+    filter: blur(0);
+  }
+}
+
+@keyframes endingOut {
+  from {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translate(-50%, calc(-50% - 8px)) scale(0.98);
+  }
 }
 
 /* 点击提示 */
@@ -1052,13 +1909,13 @@ onUnmounted(() => {
   z-index: 65;
   font-size: 9px;
   letter-spacing: 0.2em;
-  color: rgba(240, 224, 64, 0.25);
+  color: rgba(123, 224, 255, 0.38);
   pointer-events: none;
   animation: hintBlink 2.5s ease-in-out infinite;
 }
 @keyframes hintBlink {
-  0%, 100% { opacity: 0.25; }
-  50% { opacity: 0.7; }
+  0%, 100% { opacity: 0.35; }
+  50% { opacity: 0.8; }
 }
 
 /* 涟漪 Canvas */
@@ -1069,5 +1926,96 @@ onUnmounted(() => {
   height: 100%;
   pointer-events: none;
   z-index: 55;
+}
+
+@media (max-width: 720px) {
+  .hud-status {
+    top: 24px;
+    right: 24px;
+  }
+
+  .data-stream {
+    left: 24px;
+    bottom: 28px;
+    max-width: 46vw;
+  }
+
+  .tech-content {
+    padding: 0 24px;
+  }
+
+  .explore-hud {
+    right: 20px;
+    bottom: 20px;
+    left: 20px;
+    align-items: stretch;
+  }
+
+  .link-metrics {
+    justify-content: flex-start;
+    max-width: none;
+  }
+
+  .tour-speed {
+    justify-content: space-between;
+  }
+
+  .comms-popup {
+    width: min(92vw, 560px);
+    padding: 18px;
+  }
+
+  .cue-frame,
+  .briefing-panel {
+    width: min(92vw, 620px);
+    padding: 20px;
+  }
+
+  .signal-meta {
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .briefing-panel {
+    bottom: 20px;
+  }
+
+  .prep-panel {
+    bottom: 20px;
+    width: min(92vw, 560px);
+  }
+
+  .buffer-panel {
+    width: min(92vw, 560px);
+    padding: 20px;
+  }
+
+  .prep-actions {
+    grid-template-columns: 1fr;
+  }
+
+  .prep-instruction {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .ending-panel {
+    width: min(92vw, 620px);
+    padding: 20px;
+  }
+
+  .ending-header {
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .ending-stats {
+    grid-template-columns: 1fr;
+  }
+
+  .choice-btn {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
 }
 </style>
