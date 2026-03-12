@@ -1,6 +1,6 @@
 <template>
-  <div 
-    class="gallery-container" 
+  <div
+    class="gallery-container"
     ref="container" 
     :class="{ 'tech-mode': currentPage === 'tech' }"
   >
@@ -12,11 +12,15 @@
       @page-change="handlePageChange"
     />
 
-    <!-- 莫奈页面 -->
-    <MonetView v-show="currentPage === 'monet'" />
+    <!-- CG 档案馆 -->
+    <MonetView v-show="currentPage === 'monet'" :active="currentPage === 'monet'" />
 
-    <!-- 科技页面 -->
-    <TechView v-show="currentPage === 'tech'" @explore-mode="handleExploreMode" />
+    <!-- 回响链路 -->
+    <TechView
+      v-show="currentPage === 'tech'"
+      :active="currentPage === 'tech'"
+      @explore-mode="handleExploreMode"
+    />
   </div>
 </template>
 
@@ -84,7 +88,7 @@ onMounted(() => {
 .gallery-container {
   width: 100vw;
   height: 100vh;
-  background: radial-gradient(circle, #eef2f3 0%, #8e9eab 100%);
+  background: radial-gradient(circle at 50% 22%, #4c3925 0%, #17120f 58%, #060505 100%);
   overflow: hidden;
   font-family: 'PingFang SC', serif;
   position: relative;

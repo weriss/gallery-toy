@@ -117,7 +117,7 @@ export const TECH_WINDOW_CUES: Record<string, SceneCue> = {
   'X-05': {
     mode: 'skyfold',
     title: 'SKYFOLD / FINAL WINDOW',
-    body: '高空像幕布一样展开，全部山脊同时发亮。最后一次建议会决定她带回人，还是带回真相。',
+    body: '高空像幕布一样展开，全部山脊同时发亮。最后一道窗口不会凭空制造命运，它只会替你们前面一路推出来的倾向签字。',
   },
 };
 

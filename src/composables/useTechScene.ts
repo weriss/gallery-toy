@@ -8,7 +8,6 @@ interface UseTechSceneOptions {
   canvasEl: Ref<HTMLCanvasElement | null>;
   completedSignals: Record<string, boolean>;
   isExploring: Ref<boolean>;
-  onSignalTrigger: (nodeId: string, dist: number) => void;
   rippleEl: Ref<HTMLCanvasElement | null>;
   routeMarkers: Ref<number>;
   environmentMode: Ref<SceneCueMode | 'calm'>;
@@ -45,7 +44,6 @@ export function useTechScene({
   canvasEl,
   completedSignals,
   isExploring,
-  onSignalTrigger,
   rippleEl,
   routeMarkers,
   environmentMode,
@@ -880,13 +878,7 @@ export function useTechScene({
         }
 
         const dist = camera.position.distanceTo(node.pos);
-        if (!node.completed && signalsArmed.value && !activeTransmission.value && !node.triggered && dist < 3.5) {
-          node.triggered = true;
-          onSignalTrigger(node.id, dist);
-        }
-        if (node.triggered && dist > 6) {
-          node.triggered = false;
-        }
+        node.triggered = !node.completed && signalsArmed.value && !activeTransmission.value && dist < 3.5;
       });
 
       animateRipples();

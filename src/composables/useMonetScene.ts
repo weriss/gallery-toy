@@ -3,15 +3,19 @@ import * as THREE from 'three';
 import gsap from 'gsap';
 
 interface LayerAsset {
-  url: string;
   depth: number;
   scale: number;
   name: string;
+  title: string;
+  subtitle: string;
+  aspect: number;
+  accent: string;
 }
 
 interface MonetSceneReturn {
   initScene: () => void;
   loadLayers: () => void;
+  playArchiveReveal: () => void;
   animate: () => void;
   onResize: () => void;
   updateMouseTarget: (e: MouseEvent) => void;
@@ -30,6 +34,12 @@ export function useMonetScene(canvasEl: Ref<HTMLCanvasElement | null>): MonetSce
   let renderer: THREE.WebGLRenderer | undefined;
   let mouse = new THREE.Vector2();
   let targetMouse = new THREE.Vector2();
+  const assets: LayerAsset[] = [
+    { depth: -2, scale: 6.1, name: 'sky', title: 'SKYFOLD MATTE', subtitle: '天幕底片 / 高空异象保留位', aspect: 16 / 9, accent: 'rgba(255, 231, 178, 0.92)' },
+    { depth: -0.4, scale: 4.6, name: 'boy', title: 'SCALE FIGURE', subtitle: '远景尺度参照 / 人类尺寸锚点', aspect: 4 / 5, accent: 'rgba(144, 214, 255, 0.9)' },
+    { depth: 1.1, scale: 3.9, name: 'woman', title: 'HERO SILHOUETTE', subtitle: '主角剪影保留位 / 第一眼情绪层', aspect: 4 / 5, accent: 'rgba(255, 216, 143, 0.92)' },
+    { depth: 2.5, scale: 5.3, name: 'grass', title: 'WIND FOREGROUND', subtitle: '前景风场 / 速度线与遮挡层', aspect: 21 / 9, accent: 'rgba(255, 255, 255, 0.9)' }
+  ];
 
   const initScene = (): void => {
     scene = new THREE.Scene();
@@ -43,78 +53,125 @@ export function useMonetScene(canvasEl: Ref<HTMLCanvasElement | null>): MonetSce
       antialias: true,
       alpha: false
     });
-    renderer.setClearColor(0xeef2f3, 1);
+    renderer.setClearColor(0x050505, 1);
     renderer.setSize(window.innerWidth, window.innerHeight);
     renderer.setPixelRatio(window.devicePixelRatio);
     renderer.sortObjects = true;
   };
 
-  const loadLayers = (): void => {
-    const loader = new THREE.TextureLoader();
-    const baseUrl = import.meta.env.BASE_URL as string;
+  const createPlaceholderTexture = (asset: LayerAsset): THREE.CanvasTexture => {
+    const canvas = document.createElement('canvas');
+    canvas.width = 1600;
+    canvas.height = Math.round(canvas.width / asset.aspect);
+    const ctx = canvas.getContext('2d');
 
-    const assets: LayerAsset[] = [
-      { url: `${baseUrl}sky.png`, depth: -2, scale: 6, name: 'sky' },
-      { url: `${baseUrl}boy.png`, depth: -0.5, scale: 4.5, name: 'boy' },
-      { url: `${baseUrl}lady-removebg-preview.png`, depth: 1, scale: 3.8, name: 'woman' },
-      { url: `${baseUrl}grass-removebg-preview.png`, depth: 2.5, scale: 5, name: 'grass' }
-    ];
+    if (!ctx) {
+      return new THREE.CanvasTexture(canvas);
+    }
+
+    ctx.fillStyle = '#050505';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    ctx.strokeStyle = 'rgba(255,255,255,0.18)';
+    ctx.lineWidth = 4;
+    ctx.strokeRect(28, 28, canvas.width - 56, canvas.height - 56);
+
+    ctx.strokeStyle = asset.accent.replace('0.92', '0.22').replace('0.9', '0.22');
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([14, 12]);
+    ctx.strokeRect(58, 58, canvas.width - 116, canvas.height - 116);
+    ctx.setLineDash([]);
+
+    ctx.fillStyle = 'rgba(255,255,255,0.035)';
+    for (let index = 0; index < 4; index += 1) {
+      ctx.fillRect(88, 124 + index * 26, canvas.width - 176, 6);
+    }
+
+    ctx.fillStyle = 'rgba(255,255,255,0.22)';
+    ctx.font = '700 48px "Space Mono", monospace';
+    ctx.fillText(asset.title, 88, 200);
+
+    ctx.fillStyle = 'rgba(255,255,255,0.14)';
+    ctx.font = '500 24px "Space Mono", monospace';
+    ctx.fillText(asset.subtitle, 88, 242);
+
+    ctx.fillStyle = 'rgba(255,255,255,0.12)';
+    ctx.font = '400 18px "Space Mono", monospace';
+    ctx.fillText(`LAYER / ${asset.name.toUpperCase()} / DEPTH ${asset.depth}`, 88, canvas.height - 84);
+
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.needsUpdate = true;
+    return texture;
+  };
+
+  const playArchiveReveal = (): void => {
+    layers.value.forEach((mesh: THREE.Mesh, index) => {
+      const side = index % 2 === 0 ? -1 : 1;
+      const material = mesh.material as THREE.MeshBasicMaterial;
+
+      gsap.killTweensOf(mesh.position);
+      gsap.killTweensOf(mesh.rotation);
+      gsap.killTweensOf(material);
+
+      mesh.position.x = side * (11 + index * 2.2);
+      mesh.position.y = index === 0 ? -0.35 : index === 3 ? 0.35 : 0;
+      mesh.rotation.y = side * 0.9;
+      mesh.rotation.z = side * 0.04;
+      material.opacity = 0.12;
+
+      gsap.to(mesh.position, {
+        x: 0,
+        y: 0,
+        duration: 1.6,
+        delay: index * 0.16,
+        ease: 'power3.out'
+      });
+      gsap.to(mesh.rotation, {
+        y: 0,
+        z: 0,
+        duration: 1.5,
+        delay: index * 0.16,
+        ease: 'power2.out'
+      });
+      gsap.to(material, {
+        opacity: 1,
+        duration: 1.1,
+        delay: index * 0.16 + 0.12,
+        ease: 'power2.inOut'
+      });
+    });
+  };
+
+  const loadLayers = (): void => {
 
     assets.forEach((item, index) => {
-      loader.load(
-        item.url,
-        (texture: THREE.Texture) => {
-          const image = texture.image as HTMLImageElement;
-          const aspect = image.width / image.height;
-          const geometry = new THREE.PlaneGeometry(aspect * item.scale, item.scale);
-          const material = new THREE.MeshBasicMaterial({
-            map: texture,
-            transparent: true,
-            side: THREE.DoubleSide,
-            color: new THREE.Color(1, 1, 1),
-            alphaTest: 0.1,
-            depthWrite: true
-          });
+      const texture = createPlaceholderTexture(item);
+      const geometry = new THREE.PlaneGeometry(item.aspect * item.scale, item.scale);
+      const material = new THREE.MeshBasicMaterial({
+        map: texture,
+        transparent: false,
+        side: THREE.DoubleSide,
+        color: new THREE.Color(1, 1, 1),
+        depthWrite: true
+      });
 
-          const mesh = new THREE.Mesh(geometry, material);
-          mesh.position.set(0, 0, item.depth);
-          mesh.userData.name = item.name;
-          mesh.renderOrder = -item.depth;
+      const mesh = new THREE.Mesh(geometry, material);
+      mesh.position.set(0, 0, item.depth);
+      mesh.userData.name = item.name;
+      mesh.renderOrder = -item.depth;
 
-          mesh.position.x = index % 2 === 0 ? -15 : 15;
-          mesh.rotation.y = index % 2 === 0 ? -Math.PI / 4 : Math.PI / 4;
-          mesh.material.opacity = 0;
+      mesh.position.x = 0;
+      mesh.rotation.y = 0;
+      mesh.material.opacity = 1;
 
-          if (scene) {
-            scene.add(mesh);
-          }
-          layers.value.push(mesh);
-          console.log(`✓ 加载成功: ${item.name} (${image.width}x${image.height})`);
+      if (scene) {
+        scene.add(mesh);
+      }
+      layers.value.push(mesh);
+    });
 
-          gsap.to(mesh.position, {
-            x: 0,
-            duration: 1.5,
-            delay: index * 0.3,
-            ease: "power3.out"
-          });
-          gsap.to(mesh.rotation, {
-            y: 0,
-            duration: 1.5,
-            delay: index * 0.3,
-            ease: "power2.out"
-          });
-          gsap.to(mesh.material, {
-            opacity: 1,
-            duration: 1,
-            delay: index * 0.3 + 0.5,
-            ease: "power2.inOut"
-          });
-        },
-        undefined,
-        (error: unknown) => {
-          console.error(`✗ 加载失败: ${item.url}`, error);
-        }
-      );
+    requestAnimationFrame(() => {
+      playArchiveReveal();
     });
   };
 
@@ -165,6 +222,7 @@ export function useMonetScene(canvasEl: Ref<HTMLCanvasElement | null>): MonetSce
   return {
     initScene,
     loadLayers,
+    playArchiveReveal,
     animate,
     onResize,
     updateMouseTarget,

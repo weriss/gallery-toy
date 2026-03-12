@@ -10,13 +10,11 @@ interface MonetInteractionReturn {
   onMouseMove: (e: MouseEvent) => void;
   onClick: (e: MouseEvent) => void;
   startExplore: () => void;
-  toggleGrayscale: () => void;
 }
 
 export function useMonetInteraction(
   isExploring: Ref<boolean>,
   dialogue: Ref<string | null>,
-  isGrayscale: Ref<boolean>,
   layers: Ref<THREE.Mesh[]>,
   camera: THREE.PerspectiveCamera
 ): MonetInteractionReturn {
@@ -66,10 +64,10 @@ export function useMonetInteraction(
         });
       
       const dialogueTexts: DialogueTexts = {
-        woman: '"克劳德总是在风起时按下快门（画笔），他说这层面纱捕捉到了光的灵魂。"',
-        boy: '这是让（Jean），莫奈的长子。在那个夏天，他始终在草坡的那头好奇地看着。',
-        grass: '这片草地生长在阿让特伊的山坡上，那里的每一缕风都带着塞纳河的气息。',
-        sky: '1875年的天空，那时印象派还被世人嘲笑，但莫奈坚信光影的魔法终将被认可。'
+        woman: '展签 01 / 前景人物层。用于建立主视觉的第一眼情绪和风向。正式 CG 中她会被替换成进入 WERISS 的现场角色。',
+        boy: '展签 02 / 远景陪体层。这个位置负责提供尺度参照，让山体和天空的压迫感有了可比较的人类尺寸。',
+        grass: '展签 03 / 前景风场层。它不只是草，而是镜头前方的速度线。风一旦成立，整个画面就开始有叙事。',
+        sky: '展签 04 / 天幕底片层。后续会叠加红脊、极光磁暴或 skyfold 光带，这里是所有关键 CG 的情绪起点。'
       };
 
       if (dialogueTexts[objName]) {
@@ -124,43 +122,9 @@ export function useMonetInteraction(
     });
   };
 
-  const toggleGrayscale = (): void => {
-    isGrayscale.value = !isGrayscale.value;
-    
-    layers.value.forEach((mesh, index) => {
-      const material = mesh.material as THREE.MeshBasicMaterial;
-      
-      gsap.to(material.color, {
-        r: isGrayscale.value ? 0.3 : 1,
-        g: isGrayscale.value ? 0.3 : 1,
-        b: isGrayscale.value ? 0.3 : 1,
-        duration: 1.5,
-        delay: index * 0.1,
-        ease: "power2.inOut"
-      });
-      
-      if (isGrayscale.value) {
-        gsap.to(mesh.rotation, {
-          z: (Math.random() - 0.5) * 0.05,
-          duration: 1,
-          delay: index * 0.1,
-          ease: "power1.inOut"
-        });
-      } else {
-        gsap.to(mesh.rotation, {
-          z: 0,
-          duration: 1,
-          delay: index * 0.1,
-          ease: "power1.inOut"
-        });
-      }
-    });
-  };
-
   return {
     onMouseMove,
     onClick,
     startExplore,
-    toggleGrayscale
   };
 }

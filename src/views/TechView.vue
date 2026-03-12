@@ -52,6 +52,7 @@
       <div>{{ currentDate }}</div>
       <div>FIELD UNIT: NIA-7</div>
       <div>PENDING WINDOWS: {{ pendingSignals }}</div>
+      <div>NEXT WINDOW: {{ nextSignalLabel }}</div>
       <div>VECTOR: {{ vectorLabel }}</div>
     </div>
 
@@ -63,7 +64,7 @@
     </div>
 
     <!-- 主内容 -->
-    <div class="tech-content" ref="contentEl">
+    <div v-show="showCover" class="tech-content" ref="contentEl">
       <div class="tech-label">// ECHO DESK · REMOTE ADVISORY LINK</div>
       <h1 class="tech-title" data-text="WERISS">WERISS</h1>
       <div class="tech-tagline">
@@ -85,7 +86,7 @@
     </div>
 
     <!-- 探索模式：退出按钮 + 速度控制 -->
-    <div class="explore-hud" ref="exploreHudEl">
+    <div v-show="showExploreHud" class="explore-hud" ref="exploreHudEl">
       <div class="link-metrics">
         <div v-for="metric in statDisplay" :key="metric.label" class="metric-chip">
           <span class="metric-label">{{ metric.label }}</span>
@@ -298,10 +299,14 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue';
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import gsap from 'gsap';
 import { useTechNarrative } from '@/composables/useTechNarrative';
 import { useTechScene } from '@/composables/useTechScene';
+
+const props = defineProps<{
+  active: boolean;
+}>();
 
 const emit = defineEmits<{ (e: 'explore-mode', active: boolean): void }>();
 
@@ -311,12 +316,13 @@ const exploreHudEl = ref<HTMLDivElement | null>(null);
 const rippleEl = ref<HTMLCanvasElement | null>(null);
 
 const isExploring = ref(false);
+const showCover = ref(true);
+const showExploreHud = ref(false);
 const tourSpeed = ref(1.0);
 const routeMarkers = ref(0);
 const introTransitionActive = ref(false);
 let introTransitionTimer: ReturnType<typeof setTimeout> | null = null;
 let introTransitionResetTimer: ReturnType<typeof setTimeout> | null = null;
-let initialWindowTimer: ReturnType<typeof setTimeout> | null = null;
 const {
   activeTransmission,
   advanceIntroBriefing,
@@ -329,12 +335,13 @@ const {
   introBriefing,
   introBriefingIndex,
   linkStatus,
-  openTransmission,
   openPendingTransmission,
   pendingSignals,
   pendingTransmission,
+  nextSignalLabel,
   performPrepAction,
   resetSession,
+  scheduleUpcomingSignal,
   sceneCue,
   sendAdvice,
   signalsArmed,
@@ -365,7 +372,6 @@ const {
   canvasEl,
   completedSignals,
   isExploring,
-  onSignalTrigger: openTransmission,
   environmentMode,
   rippleEl,
   routeMarkers,
@@ -400,6 +406,39 @@ const currentDate = computed(() => {
   return `${now.getFullYear()}.${String(now.getMonth() + 1).padStart(2, '0')}.${String(now.getDate()).padStart(2, '0')}`;
 });
 
+const restoreCoverState = () => {
+  showCover.value = true;
+  showExploreHud.value = false;
+
+  nextTick(() => {
+    if (contentEl.value && !isExploring.value) {
+      gsap.killTweensOf(contentEl.value);
+      contentEl.value.style.opacity = '1';
+      contentEl.value.style.transform = 'translateY(0)';
+    }
+
+    if (exploreHudEl.value && !isExploring.value) {
+      gsap.killTweensOf(exploreHudEl.value);
+      exploreHudEl.value.style.opacity = '0';
+      exploreHudEl.value.style.transform = 'translateY(20px)';
+    }
+  });
+};
+
+const resetTechPageToCover = () => {
+  if (introTransitionTimer) clearTimeout(introTransitionTimer);
+  if (introTransitionResetTimer) clearTimeout(introTransitionResetTimer);
+
+  introTransitionActive.value = false;
+  isExploring.value = false;
+  dismissNarrative();
+  resetSessionVisuals();
+  resetTour();
+  returnCameraHome();
+  emit('explore-mode', false);
+  restoreCoverState();
+};
+
 const handleExplore = () => {
   if (isExploring.value) return;
 
@@ -411,37 +450,45 @@ const handleExplore = () => {
   startIntroBriefing();
   playIntroSequence();
 
-  gsap.to(contentEl.value, {
-    opacity: 0,
-    y: -30,
-    duration: 0.8,
-    ease: 'power2.in',
-    onComplete: () => { if (contentEl.value) contentEl.value.style.display = 'none'; }
-  });
-
-  // 淡入探索 HUD
-  if (exploreHudEl.value) {
-    exploreHudEl.value.style.display = 'flex';
-    gsap.fromTo(exploreHudEl.value,
-      { opacity: 0, y: 20 },
-      { opacity: 1, y: 0, duration: 0.8, delay: 0.6, ease: 'power2.out' }
-    );
+  if (contentEl.value) {
+    gsap.killTweensOf(contentEl.value);
+    gsap.to(contentEl.value, {
+      opacity: 0,
+      y: -30,
+      duration: 0.8,
+      ease: 'power2.in',
+      onComplete: () => {
+        if (isExploring.value) {
+          showCover.value = false;
+        }
+      }
+    });
+  } else {
+    showCover.value = false;
   }
+
+  showExploreHud.value = true;
+  nextTick(() => {
+    if (exploreHudEl.value) {
+      gsap.killTweensOf(exploreHudEl.value);
+      gsap.fromTo(exploreHudEl.value,
+        { opacity: 0, y: 20 },
+        { opacity: 1, y: 0, duration: 0.8, delay: 0.6, ease: 'power2.out' }
+      );
+    }
+  });
 };
 
 const handleAcknowledgeIntro = () => {
   if (introTransitionTimer) clearTimeout(introTransitionTimer);
   if (introTransitionResetTimer) clearTimeout(introTransitionResetTimer);
-  if (initialWindowTimer) clearTimeout(initialWindowTimer);
   introTransitionActive.value = true;
 
   introTransitionTimer = setTimeout(() => {
     const unlocked = advanceIntroBriefing();
     if (unlocked) {
       flyToTourStart();
-      initialWindowTimer = setTimeout(() => {
-        openTransmission('Ω-01', 2.8);
-      }, 2850);
+      scheduleUpcomingSignal();
     }
   }, 220);
 
@@ -469,22 +516,33 @@ const handleExit = () => {
   emit('explore-mode', false);
   dismissNarrative();
 
-  gsap.to(exploreHudEl.value, {
-    opacity: 0,
-    y: 20,
-    duration: 0.5,
-    ease: 'power2.in',
-    onComplete: () => { if (exploreHudEl.value) exploreHudEl.value.style.display = 'none'; }
-  });
-
-  // 淡回主内容
-  if (contentEl.value) {
-    contentEl.value.style.display = 'flex';
-    gsap.fromTo(contentEl.value,
-      { opacity: 0, y: -30 },
-      { opacity: 1, y: 0, duration: 0.8, delay: 0.3, ease: 'power2.out' }
-    );
+  if (exploreHudEl.value) {
+    gsap.killTweensOf(exploreHudEl.value);
+    gsap.to(exploreHudEl.value, {
+      opacity: 0,
+      y: 20,
+      duration: 0.5,
+      ease: 'power2.in',
+      onComplete: () => {
+        if (!isExploring.value) {
+          showExploreHud.value = false;
+        }
+      }
+    });
+  } else {
+    showExploreHud.value = false;
   }
+
+  showCover.value = true;
+  nextTick(() => {
+    if (contentEl.value) {
+      gsap.killTweensOf(contentEl.value);
+      gsap.fromTo(contentEl.value,
+        { opacity: 0, y: -30 },
+        { opacity: 1, y: 0, duration: 0.8, delay: 0.3, ease: 'power2.out' }
+      );
+    }
+  });
 
   returnCameraHome();
 };
@@ -503,6 +561,20 @@ const onKeyDown = (e: KeyboardEvent) => {
   if (e.key === 'Escape' && isExploring.value) handleExit();
 };
 
+watch(
+  () => props.active,
+  (active) => {
+    if (!active) {
+      resetTechPageToCover();
+      return;
+    }
+    if (active) {
+      restoreCoverState();
+    }
+  },
+  { immediate: true },
+);
+
 onMounted(() => {
   initScene();
   animateScene();
@@ -516,7 +588,6 @@ onMounted(() => {
 onUnmounted(() => {
   if (introTransitionTimer) clearTimeout(introTransitionTimer);
   if (introTransitionResetTimer) clearTimeout(introTransitionResetTimer);
-  if (initialWindowTimer) clearTimeout(initialWindowTimer);
   window.removeEventListener('mousemove', onMouseMove);
   window.removeEventListener('resize', onResize);
   window.removeEventListener('keydown', onKeyDown);
@@ -1472,7 +1543,7 @@ onUnmounted(() => {
 
 /* 探索模式 HUD */
 .explore-hud {
-  display: none;
+  display: flex;
   position: absolute;
   bottom: 44px;
   right: 44px;
