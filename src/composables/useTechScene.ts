@@ -1,10 +1,11 @@
 import type { Ref } from 'vue';
 import * as THREE from 'three';
 import gsap from 'gsap';
-import { FINAL_SIGNAL_ID, TECH_SIGNAL_LAYOUTS, TECH_WINDOW_CUES, type ActiveTransmission, type SceneCue, type SceneCueMode } from '@/config/techNarrative';
+import { FINAL_SIGNAL_ID, TECH_SIGNAL_LAYOUTS, TECH_WINDOW_CUES, type ActiveTransmission, type AnalysisFocusTarget, type SceneCue, type SceneCueMode } from '@/config/techNarrative';
 
 interface UseTechSceneOptions {
   activeTransmission: Ref<ActiveTransmission | null>;
+  analysisFocusTarget: Ref<AnalysisFocusTarget | null>;
   canvasEl: Ref<HTMLCanvasElement | null>;
   completedSignals: Record<string, boolean>;
   isExploring: Ref<boolean>;
@@ -41,6 +42,7 @@ const TERRAIN_W = 40;
 const TERRAIN_H = 26;
 export function useTechScene({
   activeTransmission,
+  analysisFocusTarget,
   canvasEl,
   completedSignals,
   isExploring,
@@ -93,6 +95,7 @@ export function useTechScene({
   const wireColor = new THREE.Color(0x77d7ff);
   const sunColor = new THREE.Color(0xcc2200);
   const vector3Scratch = new THREE.Vector3();
+  const lookScratch = new THREE.Vector3();
 
   const shotProfiles: Record<string, ShotProfile> = {
     'Ω-01': {
@@ -743,6 +746,60 @@ export function useTechScene({
     };
   };
 
+  const getAnalysisShot = (target: AnalysisFocusTarget, elapsed: number) => {
+    if (!camera) return null;
+
+    if (target === 'sun' && sunMesh) {
+      return {
+        position: sunMesh.position.clone().add(new THREE.Vector3(-2.4, 0.8, 7.8)),
+        lookAt: sunMesh.position.clone().add(new THREE.Vector3(0, -0.2, 0)),
+        damping: 0.08,
+        fov: 34,
+      };
+    }
+
+    if (target === 'storm' && stormWall) {
+      return {
+        position: stormWall.position.clone().add(new THREE.Vector3(6.4, -1.6, 7.8)),
+        lookAt: stormWall.position.clone().add(new THREE.Vector3(-0.4, -1.1, 2.6)),
+        damping: 0.075,
+        fov: 42,
+      };
+    }
+
+    if (target === 'fissure' && fissureCore) {
+      return {
+        position: fissureCore.position.clone().add(new THREE.Vector3(2.1, 1.1, 5.4)),
+        lookAt: fissureCore.position.clone().add(new THREE.Vector3(0, 0.3, -0.8)),
+        damping: 0.08,
+        fov: 36,
+      };
+    }
+
+    if (target === 'magnetic') {
+      const node = runtimeSignalNodes.find((item) => item.id === 'Λ-04');
+      if (!node) return null;
+      return {
+        position: node.pos.clone().add(new THREE.Vector3(-3.6, 2.2, 3.2)),
+        lookAt: node.pos.clone().add(new THREE.Vector3(0.8, 0.3, -2.1)),
+        damping: 0.07,
+        fov: 40,
+      };
+    }
+
+    if (target === 'skyfold' && skyfoldArcs.length > 0) {
+      const anchor = skyfoldArcs[1]?.position ?? skyfoldArcs[0].position;
+      return {
+        position: anchor.clone().add(new THREE.Vector3(0.4, 1.8, 10.5)),
+        lookAt: anchor.clone().add(new THREE.Vector3(0, 0.2, -1.2)),
+        damping: 0.06,
+        fov: 38,
+      };
+    }
+
+    return null;
+  };
+
   const clampCameraToTerrain = () => {
     if (!camera || !terrainMesh) return;
 
@@ -833,10 +890,18 @@ export function useTechScene({
     });
 
     if (isExploring.value) {
-      const focusShot = activeTransmission.value ? getFocusShot(activeTransmission.value.id, elapsed) : null;
-      const cruiseShot = !focusShot ? getCruiseShot(findNextNodeId(), elapsed) : null;
+      const analysisShot = analysisFocusTarget.value ? getAnalysisShot(analysisFocusTarget.value, elapsed) : null;
+      const focusShot = !analysisShot && activeTransmission.value ? getFocusShot(activeTransmission.value.id, elapsed) : null;
+      const cruiseShot = !analysisShot && !focusShot ? getCruiseShot(findNextNodeId(), elapsed) : null;
 
-      if (focusShot) {
+      if (analysisShot) {
+        camera.position.x += (analysisShot.position.x - camera.position.x) * analysisShot.damping;
+        camera.position.y += (analysisShot.position.y - camera.position.y) * analysisShot.damping;
+        camera.position.z += (analysisShot.position.z - camera.position.z) * analysisShot.damping;
+        camera.fov += (analysisShot.fov - camera.fov) * 0.06;
+        camera.updateProjectionMatrix();
+        camera.lookAt(analysisShot.lookAt);
+      } else if (focusShot) {
         camera.position.x += (focusShot.position.x - camera.position.x) * focusShot.damping;
         camera.position.y += (focusShot.position.y - camera.position.y) * focusShot.damping;
         camera.position.z += (focusShot.position.z - camera.position.z) * focusShot.damping;

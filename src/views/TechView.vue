@@ -24,10 +24,22 @@
     <div class="chromatic-edge"></div>
     <div class="weather-overlay" :class="pageStateClass"></div>
     <div class="noise-overlay"></div>
+    <Transition name="focus">
+      <div v-if="analysisFocusClue" class="analysis-focus-overlay">
+        <div class="analysis-focus-copy">
+          <div class="analysis-focus-kicker">镜头聚焦</div>
+          <strong>{{ analysisFocusClue.title }}</strong>
+          <span>{{ analysisFocusClue.whyItMatters }}</span>
+        </div>
+        <button class="analysis-focus-close" @click="clearAnalysisFocus">
+          返回分析板
+        </button>
+      </div>
+    </Transition>
 
     <Transition name="cue">
       <div
-        v-if="sceneCue && !activeTransmission && !introBriefing && !endingPanel"
+        v-if="sceneCue && !activeTransmission && !pendingTransmission && !bufferingTransmission && !introBriefing && !endingPanel"
         class="scene-cue"
         :class="`cue-${sceneCue.mode}`"
       >
@@ -126,50 +138,205 @@
     <Transition name="prep">
       <div v-if="pendingTransmission && !activeTransmission" class="prep-panel">
         <div class="prep-header">
-          <span class="prep-kicker">LINK PREP / {{ pendingTransmission.id }}</span>
+          <span class="prep-kicker">副本分析 / {{ pendingTransmission.id }}</span>
           <span class="prep-dist">DIST {{ pendingTransmission.dist }}m</span>
         </div>
-        <h2 class="prep-title">{{ pendingTransmission.title }}</h2>
-        <p class="prep-body">{{ pendingTransmission.prompt }}</p>
+        <div class="prep-system-title">{{ pendingTransmission.title }}</div>
+        <h2 class="prep-title">{{ pendingTransmission.displayTitle }}</h2>
+        <div class="analysis-stagebar">
+          <button
+            class="analysis-stage-tab"
+            :class="{ active: analysisStage === 'brief' }"
+            @click="analysisStage = 'brief'"
+          >
+            1. 简报
+          </button>
+          <button
+            class="analysis-stage-tab"
+            :class="{ active: analysisStage === 'clues' }"
+            @click="handleOpenClueStage"
+          >
+            2. 线索
+          </button>
+          <button
+            class="analysis-stage-tab"
+            :class="{ active: analysisStage === 'theory' }"
+            @click="handleOpenTheoryStage"
+          >
+            3. 判断
+          </button>
+        </div>
         <div class="prep-progress">
           <span
-            v-for="step in 3"
+            v-for="step in pendingTransmission.clues.length"
             :key="step"
             class="prep-dot"
             :class="{ active: step <= pendingTransmission.progress }"
           ></span>
         </div>
         <div class="prep-instruction">
-          <span class="prep-instruction-label">WINDOW STATUS</span>
-          <span>
-            {{
-              pendingTransmission.windowReady
-                ? '正式窗口已稳定，完成至少 1 次预热后即可接入。'
-                : '正式窗口还在生成，先做一次链路预热。'
-            }}
-          </span>
+          <span class="prep-instruction-label">这一关的目标</span>
+          <span>{{ pendingTransmission.objective }}</span>
         </div>
-        <div class="prep-actions">
-          <button
-            v-for="action in pendingTransmission.actions"
-            :key="action.id"
-            class="prep-action"
-            :class="{ used: pendingTransmission.usedActions.includes(action.id) }"
-            :disabled="pendingTransmission.usedActions.includes(action.id)"
-            @click="handlePrepAction(action.id)"
-          >
-            {{ action.label }}
-          </button>
+        <div v-if="analysisStage === 'brief'" class="analysis-stage-panel">
+          <div class="analysis-brief-grid">
+            <div
+              v-for="card in pendingTransmission.briefCards"
+              :key="card.label"
+              class="analysis-brief-card"
+            >
+              <span class="analysis-brief-label">{{ card.label }}</span>
+              <strong class="analysis-brief-text">{{ card.text }}</strong>
+            </div>
+          </div>
+          <div class="analysis-question">
+            <span class="analysis-question-label">你这一步要先想清楚：</span>
+            <strong>{{ pendingTransmission.question }}</strong>
+          </div>
+          <div class="analysis-brief-next">
+            下一步：去看线索。一次只看一条，不用同时记住所有东西。
+          </div>
+          <div class="analysis-stage-actions">
+            <button class="prep-confirm ready" @click="handleOpenClueStage">
+              开始查看线索
+            </button>
+          </div>
         </div>
-        <div class="prep-result">{{ pendingTransmission.lastResult }}</div>
-        <button
-          class="prep-confirm"
-          :class="{ ready: canOpenPendingWindow }"
-          :disabled="!canOpenPendingWindow"
-          @click="handleOpenPendingWindow"
-        >
-          {{ canOpenPendingWindow ? '接入正式建议窗口' : '等待链路稳定' }}
-        </button>
+
+        <div v-else-if="analysisStage === 'clues'" class="analysis-stage-panel">
+          <div class="analysis-status">
+            已查看线索 {{ pendingTransmission.discoveredClueIds.length }}/{{ pendingTransmission.clues.length }}
+            <span class="analysis-status-divider">|</span>
+            一次只看一条，更容易抓住重点
+          </div>
+          <div class="analysis-clue-strip">
+            <button
+              v-for="(clue, index) in pendingTransmission.clues"
+              :key="clue.id"
+              class="analysis-clue-chip"
+              :class="{
+                active: index === activeClueIndex,
+                read: pendingTransmission.discoveredClueIds.includes(clue.id),
+              }"
+              @click="selectClue(index)"
+            >
+              <span class="analysis-clue-chip-index">0{{ index + 1 }}</span>
+              <span class="analysis-clue-chip-title">{{ clue.title }}</span>
+            </button>
+          </div>
+          <div v-if="currentPendingClue" class="analysis-clue-page">
+            <div class="analysis-clue-page-header">
+              <div>
+                <div class="analysis-section-title">线索 {{ activeClueIndex + 1 }} / {{ pendingTransmission.clues.length }}</div>
+                <h3 class="analysis-clue-page-title">{{ currentPendingClue.title }}</h3>
+              </div>
+              <div class="analysis-clue-page-tag">{{ currentPendingClue.tag }}</div>
+            </div>
+            <div class="analysis-clue-page-body">
+              <div class="analysis-clue-block">
+                <span class="analysis-clue-block-label">你先看到的是</span>
+                <strong class="analysis-clue-block-text">{{ currentPendingClue.summary }}</strong>
+              </div>
+              <div class="analysis-clue-block analysis-clue-block-focus">
+                <span class="analysis-clue-block-label">镜头提示</span>
+                <strong class="analysis-clue-block-text">
+                  {{ analysisFocusClue?.id === currentPendingClue.id ? '画面已经切到这条线索对应的位置。' : '切镜头去看它对应的现场位置。' }}
+                </strong>
+              </div>
+              <div
+                v-if="pendingTransmission.discoveredClueIds.includes(currentPendingClue.id)"
+                class="analysis-clue-detail"
+              >
+                <div class="analysis-clue-block">
+                  <span class="analysis-clue-block-label">展开后你知道</span>
+                  <span class="analysis-card-copy">{{ currentPendingClue.detail }}</span>
+                </div>
+                <div class="analysis-clue-block analysis-clue-block-meaning">
+                  <span class="analysis-clue-block-label">这条线索真正说明</span>
+                  <span class="analysis-card-copy">{{ currentPendingClue.whyItMatters }}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="analysis-clue-nav">
+            <button class="analysis-nav-btn" :disabled="activeClueIndex === 0" @click="shiftClue(-1)">
+              上一条
+            </button>
+            <button
+              class="analysis-nav-btn"
+              :disabled="activeClueIndex === pendingTransmission.clues.length - 1"
+              @click="shiftClue(1)"
+            >
+              下一条
+            </button>
+          </div>
+          <div class="analysis-stage-actions analysis-stage-actions-split">
+            <button class="prep-confirm analysis-secondary" @click="analysisStage = 'brief'">
+              返回简报
+            </button>
+            <button
+              class="prep-confirm"
+              :class="{ ready: canOpenTheoryStage }"
+              :disabled="!canOpenTheoryStage"
+              @click="handleOpenTheoryStage"
+            >
+              {{ canOpenTheoryStage ? '我看得差不多了，去做判断' : '至少先读两条线索' }}
+            </button>
+          </div>
+        </div>
+
+        <div v-else class="analysis-stage-panel">
+          <div class="analysis-status">
+            {{ pendingTransmission.windowReady ? '你已经找到破局点，可以直接进入正式建议。' : '从下面选一个你最相信的解释。' }}
+          </div>
+          <div class="analysis-section">
+            <div class="analysis-section-title">你认为最合理的解释</div>
+            <div class="analysis-section-copy">
+              读完至少两条线索后，选一个你最相信的判断。选错会让风险 +1，但不会立刻卡死。
+            </div>
+            <div class="prep-actions analysis-hypothesis-grid">
+              <button
+                v-for="hypothesis in pendingTransmission.hypotheses"
+                :key="hypothesis.id"
+                class="prep-action analysis-card analysis-hypothesis"
+                :class="{
+                  selected: pendingTransmission.selectedHypothesisId === hypothesis.id,
+                  used: pendingTransmission.attemptedHypothesisIds.includes(hypothesis.id)
+                    && pendingTransmission.selectedHypothesisId !== hypothesis.id,
+                }"
+                @click="handleSubmitHypothesis(hypothesis.id)"
+              >
+                <span class="analysis-card-tag">判断</span>
+                <span class="analysis-card-title">{{ hypothesis.label }}</span>
+                <span class="analysis-card-copy">{{ hypothesis.detail }}</span>
+              </button>
+            </div>
+          </div>
+          <div v-if="pendingTransmission.windowReady" class="analysis-breakthrough">
+            <div class="analysis-section-title">你找到的破局点</div>
+            <strong class="analysis-breakthrough-title">{{ pendingTransmission.breakthroughTitle }}</strong>
+            <span>
+              {{ pendingTransmission.breakthroughDetail }}
+            </span>
+          </div>
+          <div class="prep-result">
+            <span class="prep-result-label">系统反馈</span>
+            <span>{{ pendingTransmission.lastResult }}</span>
+          </div>
+          <div class="analysis-stage-actions analysis-stage-actions-split">
+            <button class="prep-confirm analysis-secondary" @click="analysisStage = 'clues'">
+              回去再看线索
+            </button>
+            <button
+              class="prep-confirm"
+              :class="{ ready: canOpenPendingWindow }"
+              :disabled="!canOpenPendingWindow"
+              @click="handleOpenPendingWindow"
+            >
+              {{ canOpenPendingWindow ? '接入正式建议窗口' : '先完成破局判断' }}
+            </button>
+          </div>
+        </div>
       </div>
     </Transition>
 
@@ -290,7 +457,7 @@
       class="click-hint"
       v-if="isExploring && signalsArmed && !activeTransmission && !bufferingTransmission && !endingPanel && !introBriefing"
     >
-      CLICK TERRAIN TO DROP ROUTE MARKERS
+      ANALYZE THE OPEN CASE OR DROP ROUTE MARKERS
     </div>
 
     <!-- 涟漪 Canvas 覆盖层 -->
@@ -303,6 +470,7 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import gsap from 'gsap';
 import { useTechNarrative } from '@/composables/useTechNarrative';
 import { useTechScene } from '@/composables/useTechScene';
+import type { AnalysisClue, AnalysisFocusTarget } from '@/config/techNarrative';
 
 const props = defineProps<{
   active: boolean;
@@ -321,6 +489,10 @@ const showExploreHud = ref(false);
 const tourSpeed = ref(1.0);
 const routeMarkers = ref(0);
 const introTransitionActive = ref(false);
+const analysisFocusTarget = ref<AnalysisFocusTarget | null>(null);
+const analysisFocusClueId = ref<string | null>(null);
+const analysisStage = ref<'brief' | 'clues' | 'theory'>('brief');
+const activeClueIndex = ref(0);
 let introTransitionTimer: ReturnType<typeof setTimeout> | null = null;
 let introTransitionResetTimer: ReturnType<typeof setTimeout> | null = null;
 const {
@@ -334,12 +506,12 @@ const {
   environmentMode,
   introBriefing,
   introBriefingIndex,
+  inspectPendingClue,
   linkStatus,
   openPendingTransmission,
   pendingSignals,
   pendingTransmission,
   nextSignalLabel,
-  performPrepAction,
   resetSession,
   scheduleUpcomingSignal,
   sceneCue,
@@ -348,6 +520,7 @@ const {
   startIntroBriefing,
   statDisplay,
   stats,
+  submitPendingHypothesis,
   vectorLabel,
 } = useTechNarrative({
   isExploring,
@@ -369,6 +542,7 @@ const {
   returnCameraHome,
 } = useTechScene({
   activeTransmission,
+  analysisFocusTarget,
   canvasEl,
   completedSignals,
   isExploring,
@@ -389,9 +563,12 @@ const introRevealLevel = computed(() => {
 });
 const introShroudVisible = computed(() => introRevealLevel.value < 1);
 const showCornerMatte = computed(() => isExploring.value && !endingPanel.value);
-const canOpenPendingWindow = computed(() => (
-  Boolean(pendingTransmission.value?.windowReady) && (pendingTransmission.value?.progress ?? 0) > 0
+const canOpenPendingWindow = computed(() => Boolean(pendingTransmission.value?.windowReady));
+const canOpenTheoryStage = computed(() => (pendingTransmission.value?.discoveredClueIds.length ?? 0) >= 2);
+const analysisFocusClue = computed(() => (
+  pendingTransmission.value?.clues.find((clue) => clue.id === analysisFocusClueId.value) ?? null
 ));
+const currentPendingClue = computed(() => pendingTransmission.value?.clues[activeClueIndex.value] ?? null);
 const introShroudStyle = computed(() => {
   const radius = 8 + introRevealLevel.value * 60;
   const softA = Math.max(radius - 18, 0);
@@ -501,17 +678,78 @@ const handleSendAdvice = (choice: NonNullable<typeof activeTransmission.value>['
   sendAdvice(choice);
 };
 
-const handlePrepAction = (actionId: string) => {
-  performPrepAction(actionId);
+const clearAnalysisFocus = () => {
+  analysisFocusTarget.value = null;
+  analysisFocusClueId.value = null;
+};
+
+const focusClue = (clue: AnalysisClue) => {
+  analysisFocusClueId.value = clue.id;
+  analysisFocusTarget.value = clue.focusTarget ?? null;
+};
+
+const revealClue = (clue: AnalysisClue) => {
+  const alreadyDiscovered = pendingTransmission.value?.discoveredClueIds.includes(clue.id) ?? false;
+  if (!alreadyDiscovered) {
+    inspectPendingClue(clue.id);
+  }
+  focusClue(clue);
+};
+
+const resetAnalysisPanels = () => {
+  analysisStage.value = 'brief';
+  activeClueIndex.value = 0;
+  clearAnalysisFocus();
+};
+
+const handleOpenClueStage = () => {
+  analysisStage.value = 'clues';
+  if (currentPendingClue.value) {
+    revealClue(currentPendingClue.value);
+  }
+};
+
+const handleOpenTheoryStage = () => {
+  if (!canOpenTheoryStage.value && !pendingTransmission.value?.windowReady) return;
+  analysisStage.value = 'theory';
+};
+
+const shiftClue = (delta: number) => {
+  if (!pendingTransmission.value) return;
+  const nextIndex = Math.min(
+    pendingTransmission.value.clues.length - 1,
+    Math.max(0, activeClueIndex.value + delta),
+  );
+  activeClueIndex.value = nextIndex;
+  if (pendingTransmission.value.clues[nextIndex]) {
+    revealClue(pendingTransmission.value.clues[nextIndex]);
+  }
+};
+
+const selectClue = (index: number) => {
+  if (!pendingTransmission.value?.clues[index]) return;
+  activeClueIndex.value = index;
+  revealClue(pendingTransmission.value.clues[index]);
+};
+
+const handleInspectClue = (clue: AnalysisClue) => {
+  revealClue(clue);
+};
+
+const handleSubmitHypothesis = (hypothesisId: string) => {
+  clearAnalysisFocus();
+  submitPendingHypothesis(hypothesisId);
 };
 
 const handleOpenPendingWindow = () => {
+  clearAnalysisFocus();
   openPendingTransmission();
 };
 
 const handleExit = () => {
   if (!isExploring.value) return;
 
+  clearAnalysisFocus();
   isExploring.value = false;
   emit('explore-mode', false);
   dismissNarrative();
@@ -550,6 +788,7 @@ const handleExit = () => {
 const handleRestartLink = () => {
   if (!isExploring.value) return;
 
+  clearAnalysisFocus();
   resetSession();
   resetSessionVisuals();
   resetTour();
@@ -565,6 +804,7 @@ watch(
   () => props.active,
   (active) => {
     if (!active) {
+      clearAnalysisFocus();
       resetTechPageToCover();
       return;
     }
@@ -573,6 +813,29 @@ watch(
     }
   },
   { immediate: true },
+);
+
+watch(
+  () => pendingTransmission.value?.id ?? null,
+  (pendingId) => {
+    if (!pendingId) {
+      resetAnalysisPanels();
+      return;
+    }
+    resetAnalysisPanels();
+  },
+);
+
+watch(
+  () => analysisStage.value,
+  (stage) => {
+    if (stage === 'clues' && currentPendingClue.value) {
+      focusClue(currentPendingClue.value);
+    }
+    if (stage !== 'clues') {
+      clearAnalysisFocus();
+    }
+  },
 );
 
 onMounted(() => {
@@ -695,6 +958,79 @@ onUnmounted(() => {
     radial-gradient(circle at 40% 80%, rgba(255,255,255,0.12) 0 1px, transparent 1px);
   background-size: 120px 120px, 160px 160px, 140px 140px;
   animation: noiseDrift 8s linear infinite;
+}
+
+.analysis-focus-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 52;
+  pointer-events: none;
+  background:
+    radial-gradient(circle at 50% 43%, rgba(255, 255, 255, 0.04) 0%, rgba(255, 255, 255, 0.02) 10%, rgba(3, 4, 8, 0.12) 18%, rgba(2, 3, 6, 0.72) 34%, rgba(2, 3, 6, 0.94) 62%, rgba(1, 2, 4, 0.98) 100%),
+    repeating-linear-gradient(180deg, rgba(255, 255, 255, 0.035) 0, rgba(255, 255, 255, 0.035) 1px, rgba(0, 0, 0, 0.04) 1px, rgba(0, 0, 0, 0.04) 3px);
+}
+
+.analysis-focus-copy {
+  position: absolute;
+  left: 26px;
+  top: 26px;
+  display: grid;
+  gap: 6px;
+  max-width: min(360px, 62vw);
+  padding: 12px 14px;
+  background: rgba(6, 10, 16, 0.62);
+  border: 1px solid rgba(123, 224, 255, 0.18);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.28);
+  backdrop-filter: blur(10px);
+}
+
+.analysis-focus-kicker {
+  font-size: 9px;
+  letter-spacing: 0.18em;
+  color: rgba(123, 224, 255, 0.76);
+}
+
+.analysis-focus-copy strong {
+  font-size: 18px;
+  line-height: 1.35;
+  color: #f8e2a4;
+}
+
+.analysis-focus-copy span {
+  font-size: 12px;
+  line-height: 1.7;
+  color: rgba(248, 226, 164, 0.82);
+}
+
+.analysis-focus-close {
+  position: absolute;
+  right: 26px;
+  top: 26px;
+  pointer-events: auto;
+  padding: 10px 12px;
+  background: rgba(6, 10, 16, 0.72);
+  border: 1px solid rgba(255, 200, 87, 0.2);
+  color: rgba(248, 226, 164, 0.88);
+  font-family: inherit;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  cursor: pointer;
+  transition: transform 0.18s ease, border-color 0.18s ease;
+}
+
+.analysis-focus-close:hover {
+  transform: translateY(-1px);
+  border-color: rgba(255, 200, 87, 0.42);
+}
+
+.focus-enter-active,
+.focus-leave-active {
+  transition: opacity 0.25s ease;
+}
+
+.focus-enter-from,
+.focus-leave-to {
+  opacity: 0;
 }
 
 @keyframes noiseDrift {
@@ -954,17 +1290,18 @@ onUnmounted(() => {
 
 .prep-panel {
   position: absolute;
-  left: 50%;
-  bottom: 42px;
-  transform: translateX(-50%);
+  right: 32px;
+  bottom: 32px;
   z-index: 76;
-  width: min(560px, 84vw);
+  width: min(460px, 38vw);
+  max-height: calc(100vh - 120px);
   padding: 18px 20px;
-  background: rgba(6, 10, 16, 0.7);
+  background: rgba(6, 10, 16, 0.58);
   border: 1px solid rgba(123, 224, 255, 0.18);
   box-shadow: 0 18px 44px rgba(0, 0, 0, 0.28);
   backdrop-filter: blur(12px);
   animation: commsBreath 4.6s ease-in-out infinite;
+  overflow-y: auto;
 }
 
 .prep-header {
@@ -982,6 +1319,388 @@ onUnmounted(() => {
   font-size: clamp(24px, 3vw, 34px);
   line-height: 1.08;
   color: #f8e2a4;
+  margin-bottom: 8px;
+}
+
+.prep-system-title {
+  margin-bottom: 8px;
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  color: rgba(123, 224, 255, 0.55);
+}
+
+.analysis-stagebar {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.analysis-stage-tab {
+  padding: 9px 10px;
+  background: rgba(9, 14, 22, 0.72);
+  border: 1px solid rgba(123, 224, 255, 0.14);
+  color: rgba(170, 199, 214, 0.74);
+  font-family: inherit;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  transition: border-color 0.18s ease, color 0.18s ease, transform 0.18s ease;
+}
+
+.analysis-stage-tab.active {
+  border-color: rgba(255, 200, 87, 0.3);
+  color: rgba(248, 226, 164, 0.92);
+}
+
+.analysis-stage-tab:hover {
+  transform: translateY(-1px);
+}
+
+.analysis-stage-panel {
+  display: grid;
+  gap: 12px;
+}
+
+.analysis-question {
+  display: grid;
+  gap: 6px;
+  padding: 12px 14px;
+  background: rgba(15, 16, 22, 0.58);
+  border: 1px solid rgba(248, 226, 164, 0.16);
+}
+
+.analysis-question-label {
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  color: rgba(123, 224, 255, 0.68);
+}
+
+.analysis-question strong {
+  font-size: 13px;
+  line-height: 1.7;
+  color: rgba(248, 226, 164, 0.94);
+}
+
+.analysis-guide {
+  display: grid;
+  gap: 8px;
+  padding: 12px 14px;
+  margin-bottom: 12px;
+  background: rgba(8, 14, 22, 0.58);
+  border: 1px solid rgba(123, 224, 255, 0.12);
+}
+
+.analysis-brief-grid {
+  display: grid;
+  gap: 10px;
+}
+
+.analysis-brief-card {
+  display: grid;
+  gap: 6px;
+  padding: 12px 14px;
+  background: rgba(8, 14, 22, 0.58);
+  border: 1px solid rgba(123, 224, 255, 0.12);
+}
+
+.analysis-brief-label {
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  color: rgba(123, 224, 255, 0.74);
+}
+
+.analysis-brief-text {
+  font-size: 13px;
+  line-height: 1.7;
+  color: rgba(248, 226, 164, 0.88);
+}
+
+.analysis-brief-next {
+  font-size: 12px;
+  line-height: 1.7;
+  color: rgba(123, 224, 255, 0.78);
+}
+
+.analysis-guide-title {
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  color: rgba(123, 224, 255, 0.74);
+}
+
+.analysis-guide-step {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 10px;
+  align-items: start;
+  font-size: 12px;
+  line-height: 1.6;
+  color: rgba(248, 226, 164, 0.82);
+}
+
+.analysis-guide-index {
+  color: rgba(255, 200, 87, 0.78);
+}
+
+.analysis-status {
+  font-size: 12px;
+  line-height: 1.7;
+  color: rgba(123, 224, 255, 0.8);
+}
+
+.analysis-status-divider {
+  margin: 0 8px;
+  color: rgba(123, 224, 255, 0.34);
+}
+
+.analysis-clue-strip {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.analysis-clue-chip {
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+  text-align: left;
+  background: rgba(9, 14, 22, 0.7);
+  border: 1px solid rgba(123, 224, 255, 0.12);
+  color: rgba(170, 199, 214, 0.72);
+  font-family: inherit;
+  cursor: pointer;
+  transition: transform 0.18s ease, border-color 0.18s ease, color 0.18s ease;
+}
+
+.analysis-clue-chip:hover {
+  transform: translateY(-1px);
+  border-color: rgba(255, 200, 87, 0.28);
+}
+
+.analysis-clue-chip.active {
+  border-color: rgba(255, 200, 87, 0.32);
+  color: rgba(248, 226, 164, 0.92);
+}
+
+.analysis-clue-chip.read {
+  background: rgba(13, 20, 30, 0.82);
+}
+
+.analysis-clue-chip-index {
+  font-size: 9px;
+  letter-spacing: 0.18em;
+  color: rgba(123, 224, 255, 0.72);
+}
+
+.analysis-clue-chip-title {
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.analysis-clue-page {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  background: rgba(8, 12, 18, 0.62);
+  border: 1px solid rgba(123, 224, 255, 0.12);
+}
+
+.analysis-clue-page-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+}
+
+.analysis-clue-page-title {
+  font-size: 20px;
+  line-height: 1.4;
+  color: #f8e2a4;
+}
+
+.analysis-clue-page-tag {
+  flex: 0 0 auto;
+  padding: 6px 8px;
+  border: 1px solid rgba(123, 224, 255, 0.14);
+  font-size: 9px;
+  letter-spacing: 0.18em;
+  color: rgba(123, 224, 255, 0.74);
+}
+
+.analysis-clue-page-body {
+  display: grid;
+  gap: 10px;
+}
+
+.analysis-clue-block {
+  display: grid;
+  gap: 6px;
+  padding: 12px 14px;
+  background: rgba(12, 16, 24, 0.62);
+  border: 1px solid rgba(123, 224, 255, 0.1);
+}
+
+.analysis-clue-block-focus {
+  border-color: rgba(255, 200, 87, 0.16);
+}
+
+.analysis-clue-block-meaning {
+  border-color: rgba(123, 224, 255, 0.16);
+}
+
+.analysis-clue-block-label {
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  color: rgba(123, 224, 255, 0.72);
+}
+
+.analysis-clue-block-text {
+  font-size: 14px;
+  line-height: 1.7;
+  color: rgba(248, 226, 164, 0.9);
+}
+
+.analysis-clue-detail {
+  display: grid;
+  gap: 10px;
+}
+
+.analysis-section {
+  margin-bottom: 14px;
+}
+
+.analysis-section-title {
+  margin-bottom: 8px;
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  color: rgba(255, 200, 87, 0.92);
+}
+
+.analysis-section-copy {
+  margin-bottom: 10px;
+  font-size: 12px;
+  line-height: 1.7;
+  color: rgba(248, 226, 164, 0.74);
+}
+
+.analysis-card {
+  text-align: left;
+}
+
+.analysis-card.selected {
+  border-color: rgba(123, 224, 255, 0.34);
+  background: rgba(13, 20, 30, 0.94);
+}
+
+.analysis-card-single {
+  width: 100%;
+}
+
+.analysis-card-tag {
+  display: block;
+  margin-bottom: 8px;
+  font-size: 9px;
+  letter-spacing: 0.18em;
+  color: rgba(123, 224, 255, 0.68);
+}
+
+.analysis-card-title {
+  display: block;
+  margin-bottom: 8px;
+  font-size: 14px;
+  line-height: 1.55;
+  color: rgba(248, 226, 164, 0.95);
+}
+
+.analysis-card-copy {
+  display: block;
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.analysis-card-summary {
+  color: rgba(248, 226, 164, 0.8);
+}
+
+.analysis-card-meaning {
+  display: block;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(123, 224, 255, 0.12);
+  font-size: 12px;
+  line-height: 1.7;
+  color: rgba(123, 224, 255, 0.86);
+}
+
+.analysis-hypothesis.selected {
+  border-color: rgba(255, 200, 87, 0.38);
+  background: rgba(18, 19, 24, 0.9);
+}
+
+.analysis-breakthrough {
+  display: grid;
+  gap: 8px;
+  padding: 12px 14px;
+  margin-bottom: 12px;
+  background: rgba(16, 18, 23, 0.75);
+  border: 1px solid rgba(255, 200, 87, 0.2);
+  color: rgba(248, 226, 164, 0.84);
+}
+
+.analysis-breakthrough-title {
+  font-size: 13px;
+  line-height: 1.6;
+  color: rgba(255, 200, 87, 0.95);
+}
+
+.analysis-clue-nav {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.analysis-nav-btn {
+  padding: 11px 10px;
+  background: rgba(9, 14, 22, 0.78);
+  border: 1px solid rgba(123, 224, 255, 0.16);
+  color: rgba(248, 226, 164, 0.8);
+  font-family: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  transition: transform 0.18s ease, border-color 0.18s ease, opacity 0.18s ease;
+}
+
+.analysis-nav-btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+  border-color: rgba(255, 200, 87, 0.36);
+}
+
+.analysis-nav-btn:disabled {
+  opacity: 0.42;
+  cursor: default;
+}
+
+.analysis-stage-actions {
+  display: grid;
+  gap: 10px;
+}
+
+.analysis-stage-actions-split {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.analysis-secondary {
+  background: rgba(9, 14, 22, 0.72);
+  border-color: rgba(123, 224, 255, 0.14);
+  color: rgba(170, 199, 214, 0.78);
+  cursor: pointer;
+}
+
+.prep-result-label {
+  color: rgba(123, 224, 255, 0.8);
+}
+
+.prep-title {
   margin-bottom: 10px;
 }
 
@@ -1062,6 +1781,8 @@ onUnmounted(() => {
 }
 
 .prep-result {
+  display: grid;
+  gap: 6px;
   min-height: 1.8em;
   font-size: 12px;
   line-height: 1.7;
@@ -1096,17 +1817,18 @@ onUnmounted(() => {
 
 .buffer-panel {
   position: absolute;
-  left: 50%;
+  right: 32px;
   top: 50%;
-  transform: translate(-50%, -50%);
+  transform: translateY(-50%);
   z-index: 77;
-  width: min(560px, 82vw);
+  width: min(440px, 36vw);
+  max-height: calc(100vh - 120px);
   padding: 24px 24px 22px;
-  background: rgba(5, 9, 14, 0.76);
+  background: rgba(5, 9, 14, 0.64);
   border: 1px solid rgba(123, 224, 255, 0.18);
   box-shadow: 0 26px 80px rgba(0, 0, 0, 0.34);
   backdrop-filter: blur(16px);
-  overflow: hidden;
+  overflow: hidden auto;
 }
 
 .buffer-grid {
@@ -1229,11 +1951,11 @@ onUnmounted(() => {
 }
 
 .prep-enter-active {
-  animation: briefingIn 0.45s cubic-bezier(0.16, 1, 0.3, 1);
+  animation: sideDockIn 0.45s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .buffer-enter-active {
-  animation: bufferIn 0.42s cubic-bezier(0.16, 1, 0.3, 1);
+  animation: sideCenterIn 0.42s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .cue-enter-active {
@@ -1246,11 +1968,11 @@ onUnmounted(() => {
 }
 
 .prep-leave-active {
-  animation: briefingOut 0.2s ease-in forwards;
+  animation: sideDockOut 0.2s ease-in forwards;
 }
 
 .buffer-leave-active {
-  animation: bufferOut 0.22s ease-in forwards;
+  animation: sideCenterOut 0.22s ease-in forwards;
 }
 
 .cue-leave-active {
@@ -1304,6 +2026,54 @@ onUnmounted(() => {
     opacity: 1;
     transform: translate(-50%, -50%) scale(1);
     filter: blur(0);
+  }
+}
+
+@keyframes sideDockIn {
+  from {
+    opacity: 0;
+    transform: translateY(18px);
+    filter: blur(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+    filter: blur(0);
+  }
+}
+
+@keyframes sideDockOut {
+  from {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+}
+
+@keyframes sideCenterIn {
+  from {
+    opacity: 0;
+    transform: translateY(calc(-50% + 18px)) scale(0.985);
+    filter: blur(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(-50%) scale(1);
+    filter: blur(0);
+  }
+}
+
+@keyframes sideCenterOut {
+  from {
+    opacity: 1;
+    transform: translateY(-50%) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(calc(-50% - 10px)) scale(1.01);
   }
 }
 
@@ -1653,17 +2423,18 @@ onUnmounted(() => {
 .comms-popup {
   position: absolute;
   top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
+  right: 32px;
+  transform: translateY(-50%);
   z-index: 80;
-  width: min(560px, 88vw);
-  background: rgba(3, 2, 5, 0.88);
+  width: min(460px, 38vw);
+  max-height: calc(100vh - 120px);
+  background: rgba(3, 2, 5, 0.66);
   border: 1px solid rgba(123, 224, 255, 0.34);
   padding: 22px 24px;
-  backdrop-filter: blur(8px);
+  backdrop-filter: blur(12px);
   box-shadow: 0 0 30px rgba(123, 224, 255, 0.12), inset 0 0 20px rgba(123, 224, 255, 0.03);
   pointer-events: auto;
-  overflow: hidden;
+  overflow: hidden auto;
   animation: commsBreath 4.6s ease-in-out infinite;
 }
 
@@ -1811,8 +2582,8 @@ onUnmounted(() => {
 }
 
 /* 弹窗进出动画 */
-.signal-enter-active { animation: sigIn 0.4s cubic-bezier(0.16, 1, 0.3, 1); }
-.signal-leave-active { animation: sigOut 0.3s ease-in forwards; }
+.signal-enter-active { animation: sideCenterIn 0.4s cubic-bezier(0.16, 1, 0.3, 1); }
+.signal-leave-active { animation: sideCenterOut 0.3s ease-in forwards; }
 @keyframes sigIn {
   0% { opacity: 0; transform: translate(-50%, calc(-50% + 18px)) scale(0.985); filter: blur(7px); }
   35% { opacity: 0.55; transform: translate(-50%, calc(-50% + 8px)) scale(1.004); filter: blur(2px); }
@@ -1843,18 +2614,20 @@ onUnmounted(() => {
 
 .ending-panel {
   position: absolute;
-  left: 50%;
+  right: 32px;
   top: 50%;
-  transform: translate(-50%, -50%);
+  transform: translateY(-50%);
   z-index: 85;
-  width: min(620px, 90vw);
+  width: min(500px, 40vw);
+  max-height: calc(100vh - 120px);
   padding: 26px 28px;
   background:
-    linear-gradient(135deg, rgba(10, 16, 24, 0.96), rgba(36, 18, 8, 0.88)),
-    rgba(3, 2, 5, 0.92);
+    linear-gradient(135deg, rgba(10, 16, 24, 0.76), rgba(36, 18, 8, 0.68)),
+    rgba(3, 2, 5, 0.74);
   border: 1px solid rgba(255, 200, 87, 0.3);
   box-shadow: 0 24px 60px rgba(0, 0, 0, 0.38), inset 0 0 30px rgba(123, 224, 255, 0.04);
   backdrop-filter: blur(12px);
+  overflow-y: auto;
 }
 
 .ending-header {
@@ -1941,11 +2714,11 @@ onUnmounted(() => {
 }
 
 .ending-enter-active {
-  animation: endingIn 0.45s cubic-bezier(0.16, 1, 0.3, 1);
+  animation: sideCenterIn 0.45s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .ending-leave-active {
-  animation: endingOut 0.28s ease-in forwards;
+  animation: sideCenterOut 0.28s ease-in forwards;
 }
 
 @keyframes endingIn {
@@ -2032,7 +2805,13 @@ onUnmounted(() => {
   }
 
   .comms-popup {
-    width: min(92vw, 560px);
+    right: 20px;
+    left: 20px;
+    top: auto;
+    bottom: 20px;
+    transform: none;
+    width: auto;
+    max-height: min(62vh, 680px);
     padding: 18px;
   }
 
@@ -2052,16 +2831,51 @@ onUnmounted(() => {
   }
 
   .prep-panel {
+    right: 20px;
+    left: 20px;
     bottom: 20px;
-    width: min(92vw, 560px);
+    width: auto;
+    max-height: min(68vh, 760px);
+  }
+
+  .analysis-focus-copy {
+    left: 16px;
+    right: 16px;
+    top: 16px;
+    max-width: none;
+  }
+
+  .analysis-focus-close {
+    right: 16px;
+    top: auto;
+    bottom: 16px;
   }
 
   .buffer-panel {
-    width: min(92vw, 560px);
+    right: 20px;
+    left: 20px;
+    top: auto;
+    bottom: 20px;
+    transform: none;
+    width: auto;
+    max-height: min(62vh, 680px);
     padding: 20px;
   }
 
   .prep-actions {
+    grid-template-columns: 1fr;
+  }
+
+  .analysis-stagebar {
+    grid-template-columns: 1fr;
+  }
+
+  .analysis-clue-strip {
+    grid-template-columns: 1fr;
+  }
+
+  .analysis-clue-nav,
+  .analysis-stage-actions-split {
     grid-template-columns: 1fr;
   }
 
@@ -2071,8 +2885,26 @@ onUnmounted(() => {
   }
 
   .ending-panel {
-    width: min(92vw, 620px);
+    right: 20px;
+    left: 20px;
+    top: auto;
+    bottom: 20px;
+    transform: none;
+    width: auto;
+    max-height: min(72vh, 760px);
     padding: 20px;
+  }
+
+  .signal-enter-active,
+  .buffer-enter-active,
+  .ending-enter-active {
+    animation: sideDockIn 0.38s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  .signal-leave-active,
+  .buffer-leave-active,
+  .ending-leave-active {
+    animation: sideDockOut 0.22s ease-in forwards;
   }
 
   .ending-header {
