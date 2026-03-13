@@ -17,6 +17,8 @@ export interface AnalysisClue {
   detail: string;
   whyItMatters: string;
   focusTarget?: AnalysisFocusTarget;
+  sceneLabel: string;
+  sceneAnchor: AnalysisSceneAnchor;
 }
 
 export interface AnalysisHypothesis {
@@ -26,6 +28,22 @@ export interface AnalysisHypothesis {
 }
 
 export type AnalysisFocusTarget = 'sun' | 'storm' | 'fissure' | 'magnetic' | 'skyfold';
+export type AnalysisSceneAnchor =
+  | 'red_sun'
+  | 'ridge_vent'
+  | 'echo_spine'
+  | 'storm_front'
+  | 'stone_shelter'
+  | 'crosswind_gap'
+  | 'fissure_probe'
+  | 'fissure_core'
+  | 'snow_loop'
+  | 'hud_glitch'
+  | 'old_map'
+  | 'body_vector'
+  | 'route_beacon'
+  | 'sky_seam'
+  | 'final_voice';
 
 export interface AnalysisBriefCard {
   label: string;
@@ -280,6 +298,8 @@ export const TECH_SIGNAL_LAYOUTS: SignalNodeLayout[] = [
             detail: 'NIA-7 的风场记录显示阵风始终向西，速度稳定；只有红光边缘以恒定速度向东贴着山脊推进，说明它不受表层风向驱动。',
             whyItMatters: '这说明红光不像普通天气。真正的云雾通常会跟着风走。',
             focusTarget: 'sun',
+            sceneLabel: '红日',
+            sceneAnchor: 'red_sun',
           },
           {
             id: 'thermal',
@@ -289,6 +309,8 @@ export const TECH_SIGNAL_LAYOUTS: SignalNodeLayout[] = [
             detail: '热像回传里最亮的区域没有在空中扩散，而是沿着山体裂隙周期性亮起，像是某种被地形束缚的脉冲。',
             whyItMatters: '这说明红光更像“山体里有什么在活动”，而不是天上的云层。',
             focusTarget: 'sun',
+            sceneLabel: '热痕',
+            sceneAnchor: 'ridge_vent',
           },
           {
             id: 'echo',
@@ -298,6 +320,8 @@ export const TECH_SIGNAL_LAYOUTS: SignalNodeLayout[] = [
             detail: '旧档案里记录过同频脉冲: 每十五秒一次，山体内部会传出低频换气声；红光每次位移都和这道脉冲同步。',
             whyItMatters: '这说明红光不是随机现象，它和山体内部某种规律活动绑在一起。',
             focusTarget: 'sun',
+            sceneLabel: '回声点',
+            sceneAnchor: 'echo_spine',
           },
         ],
         hypotheses: [
@@ -388,6 +412,8 @@ export const TECH_SIGNAL_LAYOUTS: SignalNodeLayout[] = [
             detail: '地形扫描显示峡谷侧壁有一段半塌石棚。进入其背风面后，链路噪声下降 42%，同时仍能看到雾墙横移速度。',
             whyItMatters: '这说明你不一定非要硬闯。地形本身可能就是解法的一部分。',
             focusTarget: 'storm',
+            sceneLabel: '石棚',
+            sceneAnchor: 'stone_shelter',
           },
           {
             id: 'oxygen',
@@ -397,6 +423,8 @@ export const TECH_SIGNAL_LAYOUTS: SignalNodeLayout[] = [
             detail: '模拟路径显示，一旦直接穿入雾墙核心，NIA-7 的耗氧和心率会同时抬升，链路掉帧概率也随之翻倍。',
             whyItMatters: '这说明“正面硬闯”虽然快，但代价非常高，很可能还没看清就先掉线。',
             focusTarget: 'storm',
+            sceneLabel: '雾墙',
+            sceneAnchor: 'storm_front',
           },
           {
             id: 'velocity',
@@ -406,6 +434,8 @@ export const TECH_SIGNAL_LAYOUTS: SignalNodeLayout[] = [
             detail: '测速日志表明雾墙的横移速度低于体感压迫。它看起来像“整面压来”，其实移动存在迟滞，横向绕行能抢出观察时间。',
             whyItMatters: '这说明还有抢时间的空间。问题不是“逃不掉”，而是“能不能找到更好的观察角度”。',
             focusTarget: 'storm',
+            sceneLabel: '扫频波',
+            sceneAnchor: 'crosswind_gap',
           },
         ],
         hypotheses: [
@@ -498,6 +528,8 @@ export const TECH_SIGNAL_LAYOUTS: SignalNodeLayout[] = [
             detail: '回传数据里，探针的高度从未真正归零，却每隔数秒回到同一组深度区间，像是在重复穿过同一层空间切片。',
             whyItMatters: '这说明下面不只是“深”，而是很可能存在重复层。',
             focusTarget: 'fissure',
+            sceneLabel: '探针',
+            sceneAnchor: 'fissure_probe',
           },
           {
             id: 'glare',
@@ -507,6 +539,8 @@ export const TECH_SIGNAL_LAYOUTS: SignalNodeLayout[] = [
             detail: '增亮后的画面表明，蓝光并没有稳定光源点，而是沿着侧壁来回折返。这更像一个环状腔体，而不是单向深井。',
             whyItMatters: '这说明裂口内部结构不是直通到底，更像会把视野绕回来的封闭空间。',
             focusTarget: 'fissure',
+            sceneLabel: '蓝裂口',
+            sceneAnchor: 'fissure_core',
           },
           {
             id: 'snowfall',
@@ -516,6 +550,8 @@ export const TECH_SIGNAL_LAYOUTS: SignalNodeLayout[] = [
             detail: '慢速回放里，一块雪幕残片落入裂口，五秒后又从更深处的同一画面边缘掠过，说明视野本身被折叠了。',
             whyItMatters: '这说明“往下”可能并没有真的离开原位，只是在同一个空间里循环。',
             focusTarget: 'fissure',
+            sceneLabel: '雪幕残片',
+            sceneAnchor: 'snow_loop',
           },
         ],
         hypotheses: [
@@ -606,6 +642,8 @@ export const TECH_SIGNAL_LAYOUTS: SignalNodeLayout[] = [
             detail: '磁暴打乱了 HUD 的文本与箭头顺序，可海拔和心跳曲线依旧连续，这说明“抽象指令层”被污染得比“原始身体数据层”更重。',
             whyItMatters: '这说明越“解释型”的信息越容易出错，越原始的数据反而更可信。',
             focusTarget: 'magnetic',
+            sceneLabel: '信标',
+            sceneAnchor: 'hud_glitch',
           },
           {
             id: 'oldmap',
@@ -615,6 +653,8 @@ export const TECH_SIGNAL_LAYOUTS: SignalNodeLayout[] = [
             detail: '旧地图在宏观方向上没完全失真，但它把 NIA-7 当前所在的断崖标成了可通行山脊，说明它可能只保留了远距结构。',
             whyItMatters: '这说明旧地图不是完全假，但也不能直接拿来走脚下这一步。',
             focusTarget: 'magnetic',
+            sceneLabel: '旧地图',
+            sceneAnchor: 'old_map',
           },
           {
             id: 'wind',
@@ -624,6 +664,8 @@ export const TECH_SIGNAL_LAYOUTS: SignalNodeLayout[] = [
             detail: '身体传感器记录显示，只要关闭覆盖层，脚下坡度与横风方向会立刻恢复一致，而界面层仍继续漂移。',
             whyItMatters: '这说明脚下坡度和风向是最底层的真实信息，比地图更不容易被带偏。',
             focusTarget: 'magnetic',
+            sceneLabel: '体感向量',
+            sceneAnchor: 'body_vector',
           },
         ],
         hypotheses: [
@@ -716,6 +758,8 @@ export const TECH_SIGNAL_LAYOUTS: SignalNodeLayout[] = [
             detail: '链路回算显示，你的选择不是孤立按钮。前面累积下来的信任、风险和真相，已经把路线推成一条倾向明确的轨迹。',
             whyItMatters: '这说明终局不是新题，而是你前面一路选择的结果开始收束了。',
             focusTarget: 'skyfold',
+            sceneLabel: '路径信标',
+            sceneAnchor: 'route_beacon',
           },
           {
             id: 'sky',
@@ -725,6 +769,8 @@ export const TECH_SIGNAL_LAYOUTS: SignalNodeLayout[] = [
             detail: '展开曲线显示，继续深入会最先断掉链路；立刻回撤能保住人；原地维持则会让链路变成一个短暂稳定的锚点。',
             whyItMatters: '这说明三种终局不是简单对错，而是三种不同代价。',
             focusTarget: 'skyfold',
+            sceneLabel: '天幕裂缝',
+            sceneAnchor: 'sky_seam',
           },
           {
             id: 'voice',
@@ -734,6 +780,8 @@ export const TECH_SIGNAL_LAYOUTS: SignalNodeLayout[] = [
             detail: '末段语音里，她没有再追问路线细节，而是把“证据”“回头”“不断线”摆成同级选项，说明终局的关键是选择哪种代价被承认。',
             whyItMatters: '这说明你最后要做的是表态，而不是继续拖时间等标准答案出现。',
             focusTarget: 'skyfold',
+            sceneLabel: '末端回声',
+            sceneAnchor: 'final_voice',
           },
         ],
         hypotheses: [

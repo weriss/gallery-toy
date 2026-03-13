@@ -481,10 +481,10 @@ export function useTechNarrative({ isExploring, routeMarkers }: UseTechNarrative
     const event = SIGNAL_EVENT_MAP.get(pendingTransmission.value.id);
     if (!hypothesis || !event) return;
 
-    if (pendingTransmission.value.discoveredClueIds.length < 2) {
+    if (pendingTransmission.value.discoveredClueIds.length < pendingTransmission.value.clues.length) {
       pendingTransmission.value = {
         ...pendingTransmission.value,
-        lastResult: '至少先看两条线索，不然这更像撞运气，而不是破局。',
+        lastResult: '先把现场里的核心线索找齐。现在下判断还太早。',
       };
       return;
     }

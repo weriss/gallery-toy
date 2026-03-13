@@ -26,14 +26,64 @@
     <div class="noise-overlay"></div>
     <Transition name="focus">
       <div v-if="analysisFocusClue" class="analysis-focus-overlay">
-        <div class="analysis-focus-copy">
+        <div ref="focusCopyEl" class="analysis-focus-copy">
           <div class="analysis-focus-kicker">镜头聚焦</div>
           <strong>{{ analysisFocusClue.title }}</strong>
           <span>{{ analysisFocusClue.whyItMatters }}</span>
         </div>
-        <button class="analysis-focus-close" @click="clearAnalysisFocus">
+        <button ref="focusCloseEl" class="analysis-focus-close" @click="clearAnalysisFocus">
           返回分析板
         </button>
+      </div>
+    </Transition>
+
+    <Transition name="hotspots">
+      <div v-if="showSceneHotspots" class="scene-hotspot-layer">
+        <div
+          v-for="hotspot in visibleSceneHotspots"
+          :key="hotspot.clueId"
+          class="scene-hotspot-cluster"
+          :style="{ left: `${hotspot.x}px`, top: `${hotspot.y}px` }"
+        >
+          <button
+            class="scene-hotspot"
+            :class="{ read: hotspot.discovered, expanded: selectedSceneClue?.id === hotspot.clueId }"
+            @click.stop="handleSceneHotspotClick(hotspot.clueId)"
+          >
+            <span class="scene-hotspot-dot"></span>
+            <span class="scene-hotspot-label">{{ hotspot.label }}</span>
+            <span class="scene-hotspot-state">
+              {{ selectedSceneClue?.id === hotspot.clueId ? '再次点击收起' : hotspot.discovered ? '点击重看线索' : '点击勘验' }}
+            </span>
+          </button>
+          <div
+            v-if="selectedSceneClue?.id === hotspot.clueId"
+            class="scene-hotspot-card"
+            :style="getHotspotCardStyle(hotspot)"
+          >
+            <div class="scene-hotspot-card-header">
+              <div>
+                <div class="scene-hotspot-card-kicker">{{ selectedSceneClue.tag }}</div>
+                <strong>{{ selectedSceneClue.title }}</strong>
+              </div>
+              <span class="scene-hotspot-card-badge">{{ selectedSceneClue.sceneLabel }}</span>
+            </div>
+            <div class="scene-hotspot-card-body">
+              <div class="scene-hotspot-copy-block">
+                <span>你在现场看到</span>
+                <strong>{{ selectedSceneClue.summary }}</strong>
+              </div>
+              <div class="scene-hotspot-copy-block">
+                <span>系统归档结果</span>
+                <p>{{ selectedSceneClue.detail }}</p>
+              </div>
+              <div class="scene-hotspot-copy-block scene-hotspot-copy-block-meaning">
+                <span>这条线索说明</span>
+                <p>{{ selectedSceneClue.whyItMatters }}</p>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
     </Transition>
 
@@ -136,156 +186,114 @@
     </Transition>
 
     <Transition name="prep">
-      <div v-if="pendingTransmission && !activeTransmission" class="prep-panel">
+      <div
+        v-if="pendingTransmission && !activeTransmission"
+        ref="prepPanelEl"
+        class="prep-panel"
+        :class="{ collapsed: prepPanelCollapsed }"
+      >
         <div class="prep-header">
           <span class="prep-kicker">副本分析 / {{ pendingTransmission.id }}</span>
-          <span class="prep-dist">DIST {{ pendingTransmission.dist }}m</span>
-        </div>
-        <div class="prep-system-title">{{ pendingTransmission.title }}</div>
-        <h2 class="prep-title">{{ pendingTransmission.displayTitle }}</h2>
-        <div class="analysis-stagebar">
-          <button
-            class="analysis-stage-tab"
-            :class="{ active: analysisStage === 'brief' }"
-            @click="analysisStage = 'brief'"
-          >
-            1. 简报
-          </button>
-          <button
-            class="analysis-stage-tab"
-            :class="{ active: analysisStage === 'clues' }"
-            @click="handleOpenClueStage"
-          >
-            2. 线索
-          </button>
-          <button
-            class="analysis-stage-tab"
-            :class="{ active: analysisStage === 'theory' }"
-            @click="handleOpenTheoryStage"
-          >
-            3. 判断
-          </button>
-        </div>
-        <div class="prep-progress">
-          <span
-            v-for="step in pendingTransmission.clues.length"
-            :key="step"
-            class="prep-dot"
-            :class="{ active: step <= pendingTransmission.progress }"
-          ></span>
-        </div>
-        <div class="prep-instruction">
-          <span class="prep-instruction-label">这一关的目标</span>
-          <span>{{ pendingTransmission.objective }}</span>
-        </div>
-        <div v-if="analysisStage === 'brief'" class="analysis-stage-panel">
-          <div class="analysis-brief-grid">
-            <div
-              v-for="card in pendingTransmission.briefCards"
-              :key="card.label"
-              class="analysis-brief-card"
-            >
-              <span class="analysis-brief-label">{{ card.label }}</span>
-              <strong class="analysis-brief-text">{{ card.text }}</strong>
-            </div>
-          </div>
-          <div class="analysis-question">
-            <span class="analysis-question-label">你这一步要先想清楚：</span>
-            <strong>{{ pendingTransmission.question }}</strong>
-          </div>
-          <div class="analysis-brief-next">
-            下一步：去看线索。一次只看一条，不用同时记住所有东西。
-          </div>
-          <div class="analysis-stage-actions">
-            <button class="prep-confirm ready" @click="handleOpenClueStage">
-              开始查看线索
+          <div class="prep-header-actions">
+            <span class="prep-dist">DIST {{ pendingTransmission.dist }}m</span>
+            <button class="prep-collapse" @click="togglePrepPanel">
+              {{ prepPanelCollapsed ? '展开面板' : '折叠面板' }}
             </button>
           </div>
         </div>
+        <template v-if="prepPanelCollapsed">
+          <div class="prep-collapsed-title">
+            {{ allPendingCluesCollected ? '判断已解锁' : `现场探索 ${collectedClueCount}/${pendingTransmission.clues.length}` }}
+          </div>
+          <div class="prep-collapsed-copy">
+            {{ allPendingCluesCollected ? '线索已经找齐。展开面板，提交你对这关规则的判断。' : '点场景里的标注物体，把这关的核心线索全部找出来。' }}
+          </div>
+        </template>
 
-        <div v-else-if="analysisStage === 'clues'" class="analysis-stage-panel">
-          <div class="analysis-status">
-            已查看线索 {{ pendingTransmission.discoveredClueIds.length }}/{{ pendingTransmission.clues.length }}
-            <span class="analysis-status-divider">|</span>
-            一次只看一条，更容易抓住重点
+        <template v-else>
+          <div class="prep-system-title">{{ pendingTransmission.title }}</div>
+          <h2 class="prep-title">
+            {{ allPendingCluesCollected ? '线索找齐了，开始做判断' : pendingTransmission.displayTitle }}
+          </h2>
+          <div class="prep-instruction">
+            <span class="prep-instruction-label">这一关的目标</span>
+            <span>{{ pendingTransmission.objective }}</span>
           </div>
-          <div class="analysis-clue-strip">
-            <button
-              v-for="(clue, index) in pendingTransmission.clues"
-              :key="clue.id"
-              class="analysis-clue-chip"
-              :class="{
-                active: index === activeClueIndex,
-                read: pendingTransmission.discoveredClueIds.includes(clue.id),
-              }"
-              @click="selectClue(index)"
-            >
-              <span class="analysis-clue-chip-index">0{{ index + 1 }}</span>
-              <span class="analysis-clue-chip-title">{{ clue.title }}</span>
-            </button>
-          </div>
-          <div v-if="currentPendingClue" class="analysis-clue-page">
-            <div class="analysis-clue-page-header">
-              <div>
-                <div class="analysis-section-title">线索 {{ activeClueIndex + 1 }} / {{ pendingTransmission.clues.length }}</div>
-                <h3 class="analysis-clue-page-title">{{ currentPendingClue.title }}</h3>
-              </div>
-              <div class="analysis-clue-page-tag">{{ currentPendingClue.tag }}</div>
+
+          <div v-if="!allPendingCluesCollected" ref="analysisStageEl" class="analysis-stage-panel">
+            <div class="analysis-status">
+              已归档线索 {{ collectedClueCount }}/{{ pendingTransmission.clues.length }}
+              <span class="analysis-status-divider">|</span>
+              点击场景里的标注对象，把线索一条条捞出来
             </div>
-            <div class="analysis-clue-page-body">
-              <div class="analysis-clue-block">
-                <span class="analysis-clue-block-label">你先看到的是</span>
-                <strong class="analysis-clue-block-text">{{ currentPendingClue.summary }}</strong>
+            <div class="analysis-guide">
+              <span class="analysis-guide-title">现在怎么玩</span>
+              <div class="analysis-guide-step">
+                <span class="analysis-guide-index">01</span>
+                <span>你可以先折叠右侧面板，再去点场景里带名字的对象。</span>
               </div>
-              <div class="analysis-clue-block analysis-clue-block-focus">
-                <span class="analysis-clue-block-label">镜头提示</span>
-                <strong class="analysis-clue-block-text">
-                  {{ analysisFocusClue?.id === currentPendingClue.id ? '画面已经切到这条线索对应的位置。' : '切镜头去看它对应的现场位置。' }}
-                </strong>
+              <div class="analysis-guide-step">
+                <span class="analysis-guide-index">02</span>
+                <span>每点中一个对象，系统就会把对应线索归档到这里。</span>
               </div>
+              <div class="analysis-guide-step">
+                <span class="analysis-guide-index">03</span>
+                <span>全部线索找齐以后，判断面板才会开放。</span>
+              </div>
+            </div>
+            <div class="analysis-brief-grid">
               <div
-                v-if="pendingTransmission.discoveredClueIds.includes(currentPendingClue.id)"
-                class="analysis-clue-detail"
+                v-for="card in pendingTransmission.briefCards"
+                :key="card.label"
+                class="analysis-brief-card"
               >
-                <div class="analysis-clue-block">
-                  <span class="analysis-clue-block-label">展开后你知道</span>
-                  <span class="analysis-card-copy">{{ currentPendingClue.detail }}</span>
-                </div>
-                <div class="analysis-clue-block analysis-clue-block-meaning">
-                  <span class="analysis-clue-block-label">这条线索真正说明</span>
-                  <span class="analysis-card-copy">{{ currentPendingClue.whyItMatters }}</span>
-                </div>
+                <span class="analysis-brief-label">{{ card.label }}</span>
+                <strong class="analysis-brief-text">{{ card.text }}</strong>
+              </div>
+            </div>
+            <div class="analysis-question">
+              <span class="analysis-question-label">你这一步要先想清楚</span>
+              <strong>{{ pendingTransmission.question }}</strong>
+            </div>
+            <div class="analysis-clue-empty">
+              <span class="analysis-clue-empty-kicker">现场待勘验</span>
+              <strong>{{ selectedSceneClue ? `已展开：${selectedSceneClue.sceneLabel}` : '先去点场景里的标注对象。' }}</strong>
+              <span>{{ selectedSceneClue ? '线索正文现在直接挂在场景标注旁边。再点一次同一个标注，就能把它收起来。' : '例如红日、热痕、扫频波、信标这些都可以直接交互。线索会直接在对应标注旁边展开。' }}</span>
+            </div>
+            <div class="analysis-clue-collection">
+              <div
+                v-for="clue in pendingTransmission.clues"
+                :key="clue.id"
+                class="analysis-clue-status-card"
+                :class="{
+                  active: selectedSceneClue?.id === clue.id,
+                  read: pendingTransmission.discoveredClueIds.includes(clue.id),
+                }"
+              >
+                <span class="analysis-clue-status-label">{{ clue.sceneLabel }}</span>
+                <strong>{{ clue.title }}</strong>
+                <span class="analysis-clue-status-state">
+                  {{ pendingTransmission.discoveredClueIds.includes(clue.id) ? '已归档' : '等待勘验' }}
+                </span>
               </div>
             </div>
           </div>
-          <div class="analysis-clue-nav">
-            <button class="analysis-nav-btn" :disabled="activeClueIndex === 0" @click="shiftClue(-1)">
-              上一条
-            </button>
-            <button
-              class="analysis-nav-btn"
-              :disabled="activeClueIndex === pendingTransmission.clues.length - 1"
-              @click="shiftClue(1)"
-            >
-              下一条
-            </button>
-          </div>
-          <div class="analysis-stage-actions analysis-stage-actions-split">
-            <button class="prep-confirm analysis-secondary" @click="analysisStage = 'brief'">
-              返回简报
-            </button>
-            <button
-              class="prep-confirm"
-              :class="{ ready: canOpenTheoryStage }"
-              :disabled="!canOpenTheoryStage"
-              @click="handleOpenTheoryStage"
-            >
-              {{ canOpenTheoryStage ? '我看得差不多了，去做判断' : '至少先读两条线索' }}
-            </button>
-          </div>
-        </div>
 
-        <div v-else class="analysis-stage-panel">
+          <div v-else ref="analysisStageEl" class="analysis-stage-panel">
+            <div class="analysis-status">
+              现场线索已全部归档。现在可以提交你对这关规则的判断了。
+            </div>
+            <div class="analysis-clue-collection analysis-clue-collection-compact">
+              <div
+                v-for="clue in pendingTransmission.clues"
+                :key="clue.id"
+                class="analysis-clue-status-card read"
+              >
+                <span class="analysis-clue-status-label">{{ clue.sceneLabel }}</span>
+                <strong>{{ clue.title }}</strong>
+                <span class="analysis-clue-status-state">已归档</span>
+              </div>
+            </div>
           <div class="analysis-status">
             {{ pendingTransmission.windowReady ? '你已经找到破局点，可以直接进入正式建议。' : '从下面选一个你最相信的解释。' }}
           </div>
@@ -324,8 +332,8 @@
             <span>{{ pendingTransmission.lastResult }}</span>
           </div>
           <div class="analysis-stage-actions analysis-stage-actions-split">
-            <button class="prep-confirm analysis-secondary" @click="analysisStage = 'clues'">
-              回去再看线索
+            <button class="prep-confirm analysis-secondary" @click="prepPanelCollapsed = true">
+              先收起面板，再看一眼现场
             </button>
             <button
               class="prep-confirm"
@@ -336,13 +344,15 @@
               {{ canOpenPendingWindow ? '接入正式建议窗口' : '先完成破局判断' }}
             </button>
           </div>
-        </div>
+          </div>
+        </template>
       </div>
     </Transition>
 
     <Transition name="buffer">
       <div
         v-if="bufferingTransmission && !activeTransmission"
+        ref="bufferPanelEl"
         class="buffer-panel"
         :class="`buffer-${bufferingTransmission.mode}`"
       >
@@ -378,7 +388,12 @@
 
     <!-- 信号弹窗 -->
     <Transition name="signal">
-      <div v-if="activeTransmission" class="comms-popup">
+      <div
+        v-if="activeTransmission"
+        ref="commsPanelEl"
+        class="comms-popup"
+        :class="{ 'comms-popup-choice': activeTransmission.stage === 'choice' }"
+      >
         <div class="signal-header">
           <span class="signal-tag">// WINDOW_{{ activeTransmission.id }}</span>
           <span class="signal-dist">DIST: {{ activeTransmission.dist }}m</span>
@@ -389,18 +404,38 @@
         </div>
         <div class="signal-body" v-html="activeTransmission.message"></div>
 
-        <div v-if="activeTransmission.stage === 'choice'" class="choice-panel">
+        <div v-if="activeTransmission.stage === 'choice'" class="choice-panel choice-panel-stage">
           <div class="panel-label">TRANSMIT ADVICE</div>
-          <button
-            v-for="choice in activeTransmission.choices"
-            :key="choice.id"
-            class="choice-btn"
-            :class="{ obscured: choice.obscured }"
-            @click="handleSendAdvice(choice)"
-          >
-            <span class="choice-id">{{ choice.id }}</span>
-            <span class="choice-copy">{{ choice.label }}</span>
-          </button>
+          <div v-if="activeTransmission.choices.length === 3" class="choice-semicircle">
+            <div class="choice-table choice-table-triad" aria-hidden="true"></div>
+            <button
+              v-for="(choice, index) in activeTransmission.choices"
+              :key="choice.id"
+              type="button"
+              class="choice-btn choice-sector"
+              :class="[`choice-sector-${index}`, { obscured: choice.obscured }]"
+              @click="handleSendAdvice(choice)"
+            >
+              <span class="choice-sector-surface" aria-hidden="true"></span>
+              <span class="choice-sector-content">
+                <span class="choice-id">{{ choice.id }}</span>
+                <span class="choice-copy">{{ choice.label }}</span>
+              </span>
+            </button>
+          </div>
+          <div v-else class="choice-table">
+            <button
+              v-for="choice in activeTransmission.choices"
+              :key="choice.id"
+              type="button"
+              class="choice-btn"
+              :class="{ obscured: choice.obscured }"
+              @click="handleSendAdvice(choice)"
+            >
+              <span class="choice-id">{{ choice.id }}</span>
+              <span class="choice-copy">{{ choice.label }}</span>
+            </button>
+          </div>
         </div>
 
         <div v-else class="reply-panel">
@@ -417,7 +452,7 @@
     </Transition>
 
     <Transition name="ending">
-      <div v-if="endingPanel" class="ending-panel">
+      <div v-if="endingPanel" ref="endingPanelEl" class="ending-panel">
         <div class="ending-header">
           <div class="ending-kicker">ENDING / {{ endingPanel.code }}</div>
           <div class="ending-vector">{{ endingPanel.vector }}</div>
@@ -457,7 +492,7 @@
       class="click-hint"
       v-if="isExploring && signalsArmed && !activeTransmission && !bufferingTransmission && !endingPanel && !introBriefing"
     >
-      ANALYZE THE OPEN CASE OR DROP ROUTE MARKERS
+      EXPLORE THE TAGGED OBJECTS OR DROP ROUTE MARKERS
     </div>
 
     <!-- 涟漪 Canvas 覆盖层 -->
@@ -469,7 +504,7 @@
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import gsap from 'gsap';
 import { useTechNarrative } from '@/composables/useTechNarrative';
-import { useTechScene } from '@/composables/useTechScene';
+import { useTechScene, type SceneHotspot } from '@/composables/useTechScene';
 import type { AnalysisClue, AnalysisFocusTarget } from '@/config/techNarrative';
 
 const props = defineProps<{
@@ -482,6 +517,13 @@ const canvasEl = ref<HTMLCanvasElement | null>(null);
 const contentEl = ref<HTMLDivElement | null>(null);
 const exploreHudEl = ref<HTMLDivElement | null>(null);
 const rippleEl = ref<HTMLCanvasElement | null>(null);
+const prepPanelEl = ref<HTMLDivElement | null>(null);
+const bufferPanelEl = ref<HTMLDivElement | null>(null);
+const commsPanelEl = ref<HTMLDivElement | null>(null);
+const endingPanelEl = ref<HTMLDivElement | null>(null);
+const analysisStageEl = ref<HTMLDivElement | null>(null);
+const focusCopyEl = ref<HTMLDivElement | null>(null);
+const focusCloseEl = ref<HTMLButtonElement | null>(null);
 
 const isExploring = ref(false);
 const showCover = ref(true);
@@ -492,7 +534,9 @@ const introTransitionActive = ref(false);
 const analysisFocusTarget = ref<AnalysisFocusTarget | null>(null);
 const analysisFocusClueId = ref<string | null>(null);
 const analysisStage = ref<'brief' | 'clues' | 'theory'>('brief');
-const activeClueIndex = ref(0);
+const prepPanelCollapsed = ref(false);
+const sceneHotspots = ref<SceneHotspot[]>([]);
+const selectedSceneClueId = ref<string | null>(null);
 let introTransitionTimer: ReturnType<typeof setTimeout> | null = null;
 let introTransitionResetTimer: ReturnType<typeof setTimeout> | null = null;
 const {
@@ -546,9 +590,11 @@ const {
   canvasEl,
   completedSignals,
   isExploring,
+  pendingTransmission,
   environmentMode,
   rippleEl,
   routeMarkers,
+  sceneHotspots,
   sceneCue,
   signalsArmed,
   tourSpeed,
@@ -564,11 +610,30 @@ const introRevealLevel = computed(() => {
 const introShroudVisible = computed(() => introRevealLevel.value < 1);
 const showCornerMatte = computed(() => isExploring.value && !endingPanel.value);
 const canOpenPendingWindow = computed(() => Boolean(pendingTransmission.value?.windowReady));
-const canOpenTheoryStage = computed(() => (pendingTransmission.value?.discoveredClueIds.length ?? 0) >= 2);
+const collectedClueCount = computed(() => pendingTransmission.value?.discoveredClueIds.length ?? 0);
+const allPendingCluesCollected = computed(() => (
+  pendingTransmission.value
+    ? pendingTransmission.value.discoveredClueIds.length >= pendingTransmission.value.clues.length
+    : false
+));
+const canOpenTheoryStage = computed(() => allPendingCluesCollected.value);
 const analysisFocusClue = computed(() => (
   pendingTransmission.value?.clues.find((clue) => clue.id === analysisFocusClueId.value) ?? null
 ));
-const currentPendingClue = computed(() => pendingTransmission.value?.clues[activeClueIndex.value] ?? null);
+const selectedSceneClue = computed(() => (
+  pendingTransmission.value?.clues.find((clue) => clue.id === selectedSceneClueId.value) ?? null
+));
+const visibleSceneHotspots = computed(() => sceneHotspots.value.filter((hotspot) => hotspot.visible));
+const showSceneHotspots = computed(() => (
+  Boolean(
+    isExploring.value
+    && pendingTransmission.value
+    && !activeTransmission.value
+    && !bufferingTransmission.value
+    && !introBriefing.value
+    && !endingPanel.value,
+  )
+));
 const introShroudStyle = computed(() => {
   const radius = 8 + introRevealLevel.value * 60;
   const softA = Math.max(radius - 18, 0);
@@ -582,6 +647,91 @@ const currentDate = computed(() => {
   const now = new Date();
   return `${now.getFullYear()}.${String(now.getMonth() + 1).padStart(2, '0')}.${String(now.getDate()).padStart(2, '0')}`;
 });
+
+const animatePanelAmbient = (element: HTMLElement | null, distance = 7, duration = 4.2) => {
+  if (!element) return;
+  gsap.killTweensOf(element);
+  gsap.fromTo(
+    element,
+    { y: 0, scale: 1 },
+    {
+      y: -distance,
+      scale: 1.003,
+      duration,
+      repeat: -1,
+      yoyo: true,
+      ease: 'sine.inOut',
+    },
+  );
+};
+
+const animateStageContents = () => {
+  if (!analysisStageEl.value) return;
+  const targets = analysisStageEl.value.querySelectorAll(
+    '.analysis-guide, .analysis-brief-card, .analysis-question, .analysis-clue-page, .analysis-clue-empty, .analysis-clue-collection, .analysis-stage-actions, .analysis-status, .analysis-section, .analysis-breakthrough, .prep-result',
+  );
+  if (!targets.length) return;
+  gsap.killTweensOf(targets);
+  gsap.fromTo(
+    targets,
+    { autoAlpha: 0, y: 16, filter: 'blur(8px)' },
+    {
+      autoAlpha: 1,
+      y: 0,
+      filter: 'blur(0px)',
+      duration: 0.52,
+      ease: 'power2.out',
+      stagger: 0.045,
+      clearProps: 'filter',
+    },
+  );
+};
+
+const animateCluePage = () => {
+  if (!analysisStageEl.value) return;
+  const page = analysisStageEl.value.querySelector('.analysis-scene-clue, .analysis-clue-empty');
+  if (!page) return;
+  gsap.killTweensOf(page);
+  gsap.fromTo(
+    page,
+    { autoAlpha: 0, y: 18, rotateX: 4, transformOrigin: '50% 0%' },
+    {
+      autoAlpha: 1,
+      y: 0,
+      rotateX: 0,
+      duration: 0.48,
+      ease: 'power2.out',
+    },
+  );
+};
+
+const animateFocusOverlay = () => {
+  if (focusCopyEl.value) {
+    gsap.killTweensOf(focusCopyEl.value);
+    gsap.fromTo(
+      focusCopyEl.value,
+      { autoAlpha: 0, x: -18, y: 10, filter: 'blur(8px)' },
+      {
+        autoAlpha: 1,
+        x: 0,
+        y: 0,
+        filter: 'blur(0px)',
+        duration: 0.45,
+        ease: 'power2.out',
+        clearProps: 'filter',
+      },
+    );
+  }
+
+  if (focusCloseEl.value) {
+    gsap.killTweensOf(focusCloseEl.value);
+    gsap.fromTo(
+      focusCloseEl.value,
+      { autoAlpha: 0, x: 18, y: -6 },
+      { autoAlpha: 1, x: 0, y: 0, duration: 0.42, delay: 0.06, ease: 'power2.out' },
+    );
+  }
+};
 
 const restoreCoverState = () => {
   showCover.value = true;
@@ -688,52 +838,65 @@ const focusClue = (clue: AnalysisClue) => {
   analysisFocusTarget.value = clue.focusTarget ?? null;
 };
 
-const revealClue = (clue: AnalysisClue) => {
+const revealClue = (clue: AnalysisClue, options: { focus?: boolean } = {}) => {
   const alreadyDiscovered = pendingTransmission.value?.discoveredClueIds.includes(clue.id) ?? false;
   if (!alreadyDiscovered) {
     inspectPendingClue(clue.id);
   }
-  focusClue(clue);
+  selectedSceneClueId.value = clue.id;
+  if (options.focus) {
+    focusClue(clue);
+  } else {
+    clearAnalysisFocus();
+  }
 };
 
 const resetAnalysisPanels = () => {
   analysisStage.value = 'brief';
-  activeClueIndex.value = 0;
+  prepPanelCollapsed.value = false;
+  selectedSceneClueId.value = null;
   clearAnalysisFocus();
-};
-
-const handleOpenClueStage = () => {
-  analysisStage.value = 'clues';
-  if (currentPendingClue.value) {
-    revealClue(currentPendingClue.value);
-  }
-};
-
-const handleOpenTheoryStage = () => {
-  if (!canOpenTheoryStage.value && !pendingTransmission.value?.windowReady) return;
-  analysisStage.value = 'theory';
-};
-
-const shiftClue = (delta: number) => {
-  if (!pendingTransmission.value) return;
-  const nextIndex = Math.min(
-    pendingTransmission.value.clues.length - 1,
-    Math.max(0, activeClueIndex.value + delta),
-  );
-  activeClueIndex.value = nextIndex;
-  if (pendingTransmission.value.clues[nextIndex]) {
-    revealClue(pendingTransmission.value.clues[nextIndex]);
-  }
-};
-
-const selectClue = (index: number) => {
-  if (!pendingTransmission.value?.clues[index]) return;
-  activeClueIndex.value = index;
-  revealClue(pendingTransmission.value.clues[index]);
 };
 
 const handleInspectClue = (clue: AnalysisClue) => {
   revealClue(clue);
+};
+
+const handleSceneHotspotClick = (clueId: string) => {
+  const clue = pendingTransmission.value?.clues.find((item) => item.id === clueId);
+  if (!clue) return;
+  if (selectedSceneClueId.value === clueId) {
+    selectedSceneClueId.value = null;
+    clearAnalysisFocus();
+    return;
+  }
+  analysisStage.value = allPendingCluesCollected.value ? 'theory' : 'brief';
+  handleInspectClue(clue);
+};
+
+const getHotspotCardStyle = (hotspot: SceneHotspot) => {
+  const viewportWidth = window.innerWidth;
+  const viewportHeight = window.innerHeight;
+  const cardWidth = Math.min(320, viewportWidth * 0.42);
+  const rightOverflow = hotspot.x + cardWidth > viewportWidth - 24;
+  const lowerOverflow = hotspot.y + 260 > viewportHeight - 24;
+
+  return {
+    left: rightOverflow ? 'auto' : '0',
+    right: rightOverflow ? '0' : 'auto',
+    top: lowerOverflow ? 'auto' : 'calc(100% + 10px)',
+    bottom: lowerOverflow ? 'calc(100% + 10px)' : 'auto',
+  };
+};
+
+const togglePrepPanel = () => {
+  prepPanelCollapsed.value = !prepPanelCollapsed.value;
+  if (!prepPanelCollapsed.value) {
+    nextTick(() => {
+      animateStageContents();
+      animateCluePage();
+    });
+  }
 };
 
 const handleSubmitHypothesis = (hypothesisId: string) => {
@@ -820,21 +983,144 @@ watch(
   (pendingId) => {
     if (!pendingId) {
       resetAnalysisPanels();
+      if (prepPanelEl.value) {
+        gsap.killTweensOf(prepPanelEl.value);
+      }
       return;
     }
     resetAnalysisPanels();
+    nextTick(() => {
+      animatePanelAmbient(prepPanelEl.value, 7, 4.4);
+      animateStageContents();
+    });
   },
 );
 
 watch(
-  () => analysisStage.value,
-  (stage) => {
-    if (stage === 'clues' && currentPendingClue.value) {
-      focusClue(currentPendingClue.value);
+  () => allPendingCluesCollected.value,
+  (ready, previous) => {
+    if (!ready || ready === previous) return;
+    analysisStage.value = 'theory';
+    prepPanelCollapsed.value = false;
+    clearAnalysisFocus();
+    nextTick(() => {
+      animateStageContents();
+      animateCluePage();
+    });
+  },
+);
+
+watch(
+  () => selectedSceneClueId.value,
+  (clueId, previous) => {
+    if (!clueId || clueId === previous) return;
+    nextTick(() => {
+      animateCluePage();
+    });
+  },
+);
+
+watch(
+  () => prepPanelCollapsed.value,
+  (collapsed) => {
+    if (!collapsed) {
+      nextTick(() => {
+        animateStageContents();
+      });
     }
-    if (stage !== 'clues') {
-      clearAnalysisFocus();
+  },
+);
+
+watch(
+  () => bufferingTransmission.value?.id ?? null,
+  (bufferId) => {
+    if (!bufferId) {
+      if (bufferPanelEl.value) {
+        gsap.killTweensOf(bufferPanelEl.value);
+      }
+      return;
     }
+    nextTick(() => {
+      animatePanelAmbient(bufferPanelEl.value, 5, 3.8);
+    });
+  },
+);
+
+watch(
+  () => activeTransmission.value?.id ?? null,
+  (activeId) => {
+    if (!activeId) {
+      if (commsPanelEl.value) {
+        gsap.killTweensOf(commsPanelEl.value);
+      }
+      return;
+    }
+    nextTick(() => {
+      animatePanelAmbient(commsPanelEl.value, 6, 4);
+      if (commsPanelEl.value) {
+        const rows = commsPanelEl.value.querySelectorAll('.signal-header, .signal-meta, .signal-body, .choice-btn, .reply-panel, .signal-bar');
+        gsap.killTweensOf(rows);
+        gsap.fromTo(
+          rows,
+          { autoAlpha: 0, y: 18, filter: 'blur(8px)' },
+          {
+            autoAlpha: 1,
+            y: 0,
+            filter: 'blur(0px)',
+            duration: 0.46,
+            ease: 'power2.out',
+            stagger: 0.05,
+            clearProps: 'filter',
+          },
+        );
+      }
+    });
+  },
+);
+
+watch(
+  () => endingPanel.value?.code ?? null,
+  (endingCode) => {
+    if (!endingCode) {
+      if (endingPanelEl.value) {
+        gsap.killTweensOf(endingPanelEl.value);
+      }
+      return;
+    }
+    nextTick(() => {
+      animatePanelAmbient(endingPanelEl.value, 4, 4.8);
+      if (endingPanelEl.value) {
+        const rows = endingPanelEl.value.querySelectorAll('.ending-header, .ending-title, .ending-summary, .ending-body, .ending-stats, .ending-actions');
+        gsap.killTweensOf(rows);
+        gsap.fromTo(
+          rows,
+          { autoAlpha: 0, y: 22, filter: 'blur(10px)' },
+          {
+            autoAlpha: 1,
+            y: 0,
+            filter: 'blur(0px)',
+            duration: 0.54,
+            ease: 'power2.out',
+            stagger: 0.06,
+            clearProps: 'filter',
+          },
+        );
+      }
+    });
+  },
+);
+
+watch(
+  () => analysisFocusClue.value?.id ?? null,
+  (focusId) => {
+    if (!focusId) {
+      if (focusCopyEl.value) gsap.killTweensOf(focusCopyEl.value);
+      if (focusCloseEl.value) gsap.killTweensOf(focusCloseEl.value);
+      return;
+    }
+    nextTick(() => {
+      animateFocusOverlay();
+    });
   },
 );
 
@@ -851,6 +1137,15 @@ onMounted(() => {
 onUnmounted(() => {
   if (introTransitionTimer) clearTimeout(introTransitionTimer);
   if (introTransitionResetTimer) clearTimeout(introTransitionResetTimer);
+  gsap.killTweensOf([
+    prepPanelEl.value,
+    bufferPanelEl.value,
+    commsPanelEl.value,
+    endingPanelEl.value,
+    analysisStageEl.value,
+    focusCopyEl.value,
+    focusCloseEl.value,
+  ]);
   window.removeEventListener('mousemove', onMouseMove);
   window.removeEventListener('resize', onResize);
   window.removeEventListener('keydown', onKeyDown);
@@ -1021,6 +1316,156 @@ onUnmounted(() => {
 .analysis-focus-close:hover {
   transform: translateY(-1px);
   border-color: rgba(255, 200, 87, 0.42);
+}
+
+.scene-hotspot-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 56;
+  pointer-events: none;
+}
+
+.scene-hotspot-cluster {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  pointer-events: auto;
+}
+
+.scene-hotspot {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 8px;
+  align-items: center;
+  min-width: 112px;
+  padding: 8px 10px;
+  background: rgba(6, 10, 16, 0.62);
+  border: 1px solid rgba(123, 224, 255, 0.22);
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.24);
+  backdrop-filter: blur(8px);
+  color: rgba(248, 226, 164, 0.92);
+  font-family: inherit;
+  cursor: pointer;
+  pointer-events: auto;
+  transition: transform 0.18s ease, border-color 0.18s ease, background 0.18s ease, opacity 0.18s ease;
+}
+
+.scene-hotspot:hover {
+  transform: translateY(-3px);
+  border-color: rgba(255, 200, 87, 0.42);
+  background: rgba(10, 16, 24, 0.82);
+}
+
+.scene-hotspot.read {
+  opacity: 0.8;
+  border-color: rgba(123, 224, 255, 0.14);
+}
+
+.scene-hotspot.expanded {
+  border-color: rgba(255, 200, 87, 0.44);
+  background: rgba(12, 18, 28, 0.9);
+}
+
+.scene-hotspot-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: radial-gradient(circle, #f8e2a4 0%, #7be0ff 52%, rgba(123, 224, 255, 0.12) 100%);
+  box-shadow: 0 0 0 5px rgba(123, 224, 255, 0.08);
+  animation: hotspotPulse 1.8s ease-in-out infinite;
+}
+
+.scene-hotspot.read .scene-hotspot-dot {
+  background: radial-gradient(circle, rgba(248, 226, 164, 0.74) 0%, rgba(123, 224, 255, 0.54) 52%, rgba(123, 224, 255, 0.08) 100%);
+  animation-duration: 2.4s;
+}
+
+.scene-hotspot-label {
+  grid-column: 2;
+  font-size: 12px;
+  line-height: 1.2;
+  text-align: left;
+}
+
+.scene-hotspot-state {
+  grid-column: 1 / -1;
+  font-size: 9px;
+  letter-spacing: 0.18em;
+  color: rgba(123, 224, 255, 0.76);
+  text-align: left;
+}
+
+.scene-hotspot-card {
+  position: absolute;
+  top: calc(100% + 10px);
+  left: 0;
+  width: min(320px, 42vw);
+  display: grid;
+  gap: 10px;
+  padding: 12px 14px;
+  background: rgba(8, 12, 18, 0.92);
+  border: 1px solid rgba(255, 200, 87, 0.24);
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.34);
+  backdrop-filter: blur(12px);
+}
+
+.scene-hotspot-card-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.scene-hotspot-card-header strong {
+  font-size: 15px;
+  line-height: 1.5;
+  color: rgba(248, 226, 164, 0.94);
+}
+
+.scene-hotspot-card-kicker {
+  margin-bottom: 4px;
+  font-size: 9px;
+  letter-spacing: 0.18em;
+  color: rgba(123, 224, 255, 0.7);
+}
+
+.scene-hotspot-card-badge {
+  flex: 0 0 auto;
+  padding: 5px 7px;
+  border: 1px solid rgba(123, 224, 255, 0.16);
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  color: rgba(255, 200, 87, 0.84);
+}
+
+.scene-hotspot-card-body {
+  display: grid;
+  gap: 8px;
+}
+
+.scene-hotspot-copy-block {
+  display: grid;
+  gap: 5px;
+  padding: 10px 11px;
+  background: rgba(12, 16, 24, 0.78);
+  border: 1px solid rgba(123, 224, 255, 0.1);
+}
+
+.scene-hotspot-copy-block span {
+  font-size: 9px;
+  letter-spacing: 0.16em;
+  color: rgba(123, 224, 255, 0.72);
+}
+
+.scene-hotspot-copy-block strong,
+.scene-hotspot-copy-block p {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.7;
+  color: rgba(248, 226, 164, 0.88);
+}
+
+.scene-hotspot-copy-block-meaning {
+  border-color: rgba(255, 200, 87, 0.16);
 }
 
 .focus-enter-active,
@@ -1229,6 +1674,11 @@ onUnmounted(() => {
   50% { transform: translateX(8px); opacity: 0.65; }
 }
 
+@keyframes hotspotPulse {
+  0%, 100% { transform: scale(1); opacity: 0.82; }
+  50% { transform: scale(1.16); opacity: 1; }
+}
+
 .briefing-panel {
   position: absolute;
   left: 50%;
@@ -1312,6 +1762,48 @@ onUnmounted(() => {
   font-size: 9px;
   letter-spacing: 0.2em;
   color: rgba(123, 224, 255, 0.7);
+}
+
+.prep-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.prep-collapse {
+  padding: 7px 10px;
+  background: rgba(9, 14, 22, 0.72);
+  border: 1px solid rgba(123, 224, 255, 0.14);
+  color: rgba(248, 226, 164, 0.84);
+  font-family: inherit;
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  cursor: pointer;
+  transition: transform 0.18s ease, border-color 0.18s ease, background 0.18s ease;
+}
+
+.prep-collapse:hover {
+  transform: translateY(-1px);
+  border-color: rgba(255, 200, 87, 0.34);
+  background: rgba(12, 18, 28, 0.82);
+}
+
+.prep-panel.collapsed {
+  width: min(340px, 30vw);
+  padding-bottom: 16px;
+}
+
+.prep-collapsed-title {
+  margin-bottom: 8px;
+  font-size: 18px;
+  line-height: 1.35;
+  color: #f8e2a4;
+}
+
+.prep-collapsed-copy {
+  font-size: 12px;
+  line-height: 1.7;
+  color: rgba(123, 224, 255, 0.82);
 }
 
 .prep-title {
@@ -1512,6 +2004,12 @@ onUnmounted(() => {
   align-items: flex-start;
 }
 
+.analysis-clue-page-meta {
+  display: grid;
+  gap: 8px;
+  justify-items: end;
+}
+
 .analysis-clue-page-title {
   font-size: 20px;
   line-height: 1.4;
@@ -1525,6 +2023,15 @@ onUnmounted(() => {
   font-size: 9px;
   letter-spacing: 0.18em;
   color: rgba(123, 224, 255, 0.74);
+}
+
+.analysis-scene-badge {
+  padding: 6px 8px;
+  background: rgba(18, 23, 30, 0.88);
+  border: 1px solid rgba(255, 200, 87, 0.18);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  color: rgba(248, 226, 164, 0.88);
 }
 
 .analysis-clue-page-body {
@@ -1563,6 +2070,69 @@ onUnmounted(() => {
 .analysis-clue-detail {
   display: grid;
   gap: 10px;
+}
+
+.analysis-clue-empty {
+  display: grid;
+  gap: 8px;
+  padding: 14px;
+  background: rgba(8, 12, 18, 0.52);
+  border: 1px dashed rgba(123, 224, 255, 0.18);
+  color: rgba(248, 226, 164, 0.82);
+}
+
+.analysis-clue-empty-kicker {
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  color: rgba(123, 224, 255, 0.72);
+}
+
+.analysis-clue-collection {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.analysis-clue-collection-compact {
+  margin-bottom: 14px;
+}
+
+.analysis-clue-status-card {
+  display: grid;
+  gap: 6px;
+  padding: 12px;
+  background: rgba(9, 14, 22, 0.68);
+  border: 1px solid rgba(123, 224, 255, 0.12);
+  transition: border-color 0.18s ease, background 0.18s ease, transform 0.18s ease;
+}
+
+.analysis-clue-status-card.active {
+  border-color: rgba(255, 200, 87, 0.34);
+  background: rgba(14, 18, 24, 0.88);
+  transform: translateY(-1px);
+}
+
+.analysis-clue-status-card.read {
+  border-color: rgba(123, 224, 255, 0.18);
+  background: rgba(12, 18, 26, 0.86);
+}
+
+.analysis-clue-status-card strong {
+  font-size: 12px;
+  line-height: 1.55;
+  color: rgba(248, 226, 164, 0.9);
+}
+
+.analysis-clue-status-label {
+  font-size: 9px;
+  letter-spacing: 0.18em;
+  color: rgba(123, 224, 255, 0.72);
+}
+
+.analysis-clue-status-state {
+  font-size: 10px;
+  line-height: 1.5;
+  color: rgba(255, 200, 87, 0.82);
 }
 
 .analysis-section {
@@ -2438,6 +3008,29 @@ onUnmounted(() => {
   animation: commsBreath 4.6s ease-in-out infinite;
 }
 
+.comms-popup-choice {
+  inset: 0;
+  transform: none;
+  width: 100%;
+  max-height: none;
+  padding: 40px 0 0;
+  background: none;
+  border: none;
+  box-shadow: none;
+  backdrop-filter: none;
+  overflow: visible;
+  animation: none;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  pointer-events: none;
+}
+
+.comms-popup-choice::before {
+  display: none;
+}
+
 .comms-popup::before {
   content: '';
   position: absolute;
@@ -2449,6 +3042,49 @@ onUnmounted(() => {
   opacity: 0.7;
   pointer-events: none;
   animation: commsSweep 5.5s linear infinite;
+}
+
+.comms-popup-choice::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  bottom: -8px;
+  width: min(540px, 72vw);
+  height: 34px;
+  transform: translateX(-50%);
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(0, 0, 0, 0.34), rgba(0, 0, 0, 0));
+  filter: blur(10px);
+  pointer-events: none;
+}
+
+.comms-popup-choice .signal-header,
+.comms-popup-choice .signal-meta,
+.comms-popup-choice .signal-body {
+  width: min(760px, 82vw);
+  margin-inline: auto;
+  text-align: center;
+  pointer-events: auto;
+}
+
+.comms-popup-choice .signal-header {
+  justify-content: center;
+  gap: 18px;
+  margin-bottom: 12px;
+  border-bottom: none;
+}
+
+.comms-popup-choice .signal-meta {
+  justify-content: center;
+  gap: 12px 18px;
+  margin-bottom: 12px;
+}
+
+.comms-popup-choice .signal-body {
+  margin-bottom: 20px;
+  font-size: 16px;
+  line-height: 1.85;
+  text-wrap: balance;
 }
 .signal-header {
   display: flex;
@@ -2490,6 +3126,15 @@ onUnmounted(() => {
   gap: 10px;
 }
 
+.choice-panel-stage {
+  gap: 14px;
+  align-items: center;
+  width: 100%;
+  margin-top: auto;
+  padding-bottom: 0;
+  pointer-events: auto;
+}
+
 .panel-label {
   font-size: 9px;
   letter-spacing: 0.22em;
@@ -2501,7 +3146,6 @@ onUnmounted(() => {
 }
 
 .choice-btn {
-  width: 100%;
   display: grid;
   grid-template-columns: 50px 1fr;
   gap: 14px;
@@ -2535,20 +3179,218 @@ onUnmounted(() => {
   line-height: 1.6;
 }
 
-.choice-btn.obscured .choice-copy {
-  color: rgba(240, 224, 64, 0.72);
-  text-shadow: 1px 0 rgba(123, 224, 255, 0.28), -1px 0 rgba(255, 90, 160, 0.24);
+.choice-semicircle {
+  position: relative;
+  width: min(640px, 88vw);
+  height: 354px;
+  margin-top: 10px;
+  transform: translateY(28px);
+}
+
+.choice-table-triad {
+  display: none;
+}
+
+.choice-sector {
+  position: absolute;
+  inset: auto 0 0;
+  width: 100%;
+  height: 314px;
+  display: block;
+  border: none;
+  background: none;
+  padding: 0;
+  transform-origin: 50% 100%;
+  overflow: visible;
+  transition:
+    transform 0.34s cubic-bezier(0.22, 1, 0.36, 1),
+    filter 0.24s ease,
+    opacity 0.24s ease;
+}
+
+.choice-sector-surface,
+.choice-sector::before,
+.choice-sector::after {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.choice-sector-surface {
+  background:
+    linear-gradient(180deg, rgba(6, 18, 15, 0.7), rgba(3, 10, 9, 0.86)),
+    radial-gradient(circle at 50% 18%, rgba(114, 255, 207, 0.15), transparent 34%),
+    linear-gradient(135deg, rgba(94, 255, 198, 0.06), transparent 58%);
+  border: 1px solid rgba(105, 230, 186, 0.2);
+  box-shadow:
+    inset 0 0 0 1px rgba(150, 255, 219, 0.04),
+    inset 0 -20px 26px rgba(0, 0, 0, 0.16);
+  opacity: 0.92;
+}
+
+.choice-sector::before {
+  content: '';
+  opacity: 0;
+  transition: opacity 0.24s ease;
+  box-shadow:
+    inset 0 0 0 1px rgba(150, 255, 219, 0.4),
+    0 0 20px rgba(94, 255, 198, 0.12);
+}
+
+.choice-sector::after {
+  content: '';
+  opacity: 0;
+  background:
+    linear-gradient(180deg, rgba(122, 255, 212, 0.08), rgba(122, 255, 212, 0)),
+    radial-gradient(circle at 50% 18%, rgba(122, 255, 212, 0.14), transparent 36%);
+  transition: opacity 0.24s ease;
+}
+
+.choice-sector-0,
+.choice-sector-0 .choice-sector-surface,
+.choice-sector-0::before,
+.choice-sector-0::after {
+  clip-path: path('M 320 314 L 40 314 A 280 280 0 0 1 180 72 Z');
+}
+
+.choice-sector-1,
+.choice-sector-1 .choice-sector-surface,
+.choice-sector-1::before,
+.choice-sector-1::after {
+  clip-path: path('M 320 314 L 180 72 A 280 280 0 0 1 460 72 Z');
+}
+
+.choice-sector-2,
+.choice-sector-2 .choice-sector-surface,
+.choice-sector-2::before,
+.choice-sector-2::after {
+  clip-path: path('M 320 314 L 460 72 A 280 280 0 0 1 600 314 Z');
+}
+
+.choice-sector-0 {
+  transform: none;
+}
+
+.choice-sector-1 {
+  transform: none;
+  z-index: 2;
+}
+
+.choice-sector-2 {
+  transform: none;
+}
+
+.choice-sector:hover,
+.choice-sector:focus-visible {
+  transform: translateY(-14px);
+  filter: brightness(1.05);
+  outline: none;
+  z-index: 5;
+}
+
+.choice-sector:hover::before,
+.choice-sector:focus-visible::before,
+.choice-sector:hover::after,
+.choice-sector:focus-visible::after {
+  opacity: 1;
+}
+
+.choice-sector:hover::after,
+.choice-sector:focus-visible::after {
+  opacity: 1;
+}
+
+.choice-sector-content {
+  position: absolute;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+
+.choice-sector .choice-id,
+.choice-sector .choice-copy {
+  z-index: 1;
+}
+
+.choice-sector .choice-id {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 46px;
+  padding: 6px 10px;
+  border: 1px solid rgba(105, 230, 186, 0.2);
+  background: rgba(5, 18, 15, 0.54);
+  color: rgba(142, 255, 221, 0.9);
+  font-size: 11px;
+  letter-spacing: 0.18em;
+  box-shadow: inset 0 0 12px rgba(94, 255, 198, 0.04);
+}
+
+.choice-sector .choice-copy {
+  color: rgba(222, 246, 236, 0.92);
+  font-size: 13px;
+  line-height: 1.6;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  text-wrap: pretty;
+}
+
+.choice-sector-0 .choice-sector-content {
+  left: 92px;
+  top: 140px;
+  width: 146px;
+  align-items: center;
+}
+
+.choice-sector-0 .choice-copy {
+  width: 100%;
+  text-align: center;
+}
+
+.choice-sector-1 .choice-sector-content {
+  left: 50%;
+  top: 92px;
+  width: 232px;
+  transform: translateX(-50%);
+}
+
+.choice-sector-1 .choice-copy {
+  width: 100%;
+  text-align: center;
+}
+
+.choice-sector-2 .choice-sector-content {
+  right: 92px;
+  top: 140px;
+  width: 146px;
+  align-items: center;
+}
+
+.choice-sector-2 .choice-copy {
+  width: 100%;
+  text-align: center;
+}
+
+.choice-sector.obscured .choice-copy {
+  color: rgba(196, 232, 218, 0.76);
+  text-shadow: 1px 0 rgba(94, 255, 198, 0.24), -1px 0 rgba(77, 207, 169, 0.18);
   animation: choiceInterference 1.8s steps(2, end) infinite;
 }
 
-.choice-btn.obscured::after {
+.choice-sector.obscured::before {
   content: 'SIGNAL LOSS';
-  position: absolute;
-  top: 10px;
-  right: 12px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-end;
+  padding: 16px 18px;
   font-size: 8px;
   letter-spacing: 0.18em;
-  color: rgba(123, 224, 255, 0.58);
+  color: rgba(142, 255, 221, 0.64);
+  opacity: 1;
+  box-shadow: none;
 }
 
 .outgoing-copy,
@@ -2838,6 +3680,19 @@ onUnmounted(() => {
     max-height: min(68vh, 760px);
   }
 
+  .prep-panel.collapsed {
+    width: auto;
+  }
+
+  .prep-header {
+    align-items: flex-start;
+  }
+
+  .prep-header-actions {
+    flex-direction: column;
+    align-items: flex-end;
+  }
+
   .analysis-focus-copy {
     left: 16px;
     right: 16px;
@@ -2863,6 +3718,23 @@ onUnmounted(() => {
   }
 
   .prep-actions {
+    grid-template-columns: 1fr;
+  }
+
+  .scene-hotspot {
+    min-width: 96px;
+    padding: 7px 9px;
+  }
+
+  .scene-hotspot-label {
+    font-size: 11px;
+  }
+
+  .scene-hotspot-card {
+    width: min(280px, calc(100vw - 48px));
+  }
+
+  .analysis-clue-collection {
     grid-template-columns: 1fr;
   }
 
@@ -2919,6 +3791,62 @@ onUnmounted(() => {
   .choice-btn {
     grid-template-columns: 1fr;
     gap: 8px;
+  }
+
+  .choice-panel-stage .choice-table {
+    display: none;
+  }
+
+  .choice-semicircle {
+    width: 100%;
+    height: auto;
+    perspective: none;
+    display: grid;
+    gap: 10px;
+    margin-top: 0;
+  }
+
+  .choice-sector {
+    position: relative;
+    inset: auto;
+    width: 100%;
+    height: auto;
+    min-height: 0;
+    display: grid;
+    grid-template-columns: 50px 1fr;
+    gap: 10px;
+    align-items: center;
+    padding: 14px 16px;
+    border: 1px solid rgba(123, 224, 255, 0.24);
+    background: rgba(10, 16, 24, 0.88);
+    transform: none !important;
+    clip-path: none !important;
+  }
+
+  .choice-sector-surface,
+  .choice-sector::before,
+  .choice-sector::after {
+    display: none;
+  }
+
+  .choice-sector-content {
+    position: static;
+    display: grid;
+    gap: 8px;
+    width: auto;
+  }
+
+  .choice-sector .choice-id,
+  .choice-sector .choice-copy {
+    position: static;
+    transform: none;
+    width: auto;
+    text-align: left;
+  }
+
+  .choice-sector:hover,
+  .choice-sector:focus-visible {
+    transform: translateY(-4px) !important;
   }
 }
 </style>
